@@ -2,11 +2,8 @@
 Main script to run the Verifiable Delay Function (VDF).
 
 This script initializes a Verifiable Delay Function (VDF) with a specified RSA modulus
-bit size and delay parameter (T). It then generates a proof for the VDF and verifies it.
-
-The VDF relies on sequential squaring in an RSA group to impose a time delay that cannot
-be bypassed by parallel computation. This example demonstrates VDF setup, proof generation,
-and verification.
+bit size and delay parameter (T). It then generates a proof for the VDF and verifies it
+both sequentially and with parallelized verification using segments.
 
 Functions:
     main(): Runs the VDF demonstration, generating and verifying a proof.
@@ -21,24 +18,28 @@ def main():
 
     Initializes a VDF with a 2048-bit RSA modulus and delay parameter T=1000.
     It generates a proof by performing T sequential squarings in the RSA group,
-    then verifies the proof to demonstrate the VDF functionality.
+    then verifies the proof both sequentially and with parallel verification.
 
     Prints:
         The generated RSA modulus N.
         The computed VDF output (y).
-        The result of the VDF verification (valid or invalid).
+        The result of sequential and parallel verification (valid or invalid).
     """
     # Initialize VDF with 2048-bit modulus and delay T = 1000
-    vdf = VerifiableDelayFunction(bit_size=2048, T=1000)
+    vdf = VerifiableDelayFunction(bit_size=2048, T=1000, num_segments=10)
     print("Generated RSA modulus N:", vdf.N)
 
     # Generate proof (i.e., the delayed output)
-    y = vdf.generate_proof()
+    y, proof = vdf.generate_proof()
     print("VDF output (y):", y)
 
-    # Verify the proof
-    is_valid = vdf.verify(y)
-    print("VDF verification result:", "Valid" if is_valid else "Invalid")
+    # Sequential verification
+    is_valid_seq = vdf.verify(y)
+    print("Sequential verification:", "Valid" if is_valid_seq else "Invalid")
+
+    # Parallel verification using the proof
+    is_valid_parallel = vdf.parallel_verify(y, proof)
+    print("Parallel verification:", "Valid" if is_valid_parallel else "Invalid")
 
 
 if __name__ == "__main__":
