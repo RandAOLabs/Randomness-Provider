@@ -10,7 +10,7 @@ Functions:
 """
 
 import time
-from src.vdf import VerifiableDelayFunction
+from src.time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
 
 
 def main():
@@ -28,7 +28,7 @@ def main():
         Execution times for proof generation and each verification approach.
     """
     # Initialize VDF with 2048-bit modulus and delay T = 1000
-    vdf = VerifiableDelayFunction(bit_size=2048, T=10000000, num_segments=32)
+    vdf = TimeLockPuzzle(bit_size=2048, T=10000000, num_segments=10)
     print("Generated RSA modulus N:", vdf.N)
 
     # Time the proof generation

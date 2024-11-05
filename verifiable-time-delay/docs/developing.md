@@ -38,5 +38,9 @@ python main.py
 ## Running the Tests
 To run the unit tests, use the following command:
 ```bash
-python -m unittest discover -s tests
+pytest
+```
+With coverage:
+```bash
+pytest --cov=src
 ```
