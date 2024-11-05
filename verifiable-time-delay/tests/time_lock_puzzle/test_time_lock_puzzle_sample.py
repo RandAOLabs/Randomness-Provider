@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import patch
 from gmpy2 import mpz
-from time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
+from src.time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
 import pytest
 from unittest.mock import patch
 from gmpy2 import mpz
-from time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
+from src.time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
 
 @pytest.fixture
 def time_lock_puzzle_instance():
@@ -50,11 +50,6 @@ def test_parallel_verify(time_lock_puzzle_instance):
     """Test parallel_verify with the mocked values to ensure verification passes."""
     y, proof = time_lock_puzzle_instance.generate_proof()
     assert time_lock_puzzle_instance.parallel_verify(y, proof)  # Verification should succeed
-
-import pytest
-from unittest.mock import patch
-from gmpy2 import mpz
-from time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
 
 @pytest.fixture
 def create_time_lock_puzzle_instance():

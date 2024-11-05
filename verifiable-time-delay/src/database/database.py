@@ -1,7 +1,7 @@
-from database.constants import DATABASE_URL
 from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+from src.database.constants import DATABASE_URL
 
 # Global variable to hold the singleton engine
 _engine = None

@@ -2,9 +2,9 @@ import pytest
 from unittest.mock import patch
 from gmpy2 import mpz
 from typing import List
-from time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
-from database.entity.time_lock_puzzle import TimeLockPuzzleEntity
-from converters.time_lock_puzzle import convert_time_lock_puzzle_to_entity  # Adjust the import path if needed
+from src.time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
+from src.database.entity.time_lock_puzzle_entity import TimeLockPuzzleEntity
+from src.converters.time_lock_puzzle_converter import convert_time_lock_puzzle_to_entity  # Adjust the import path if needed
 
 @pytest.fixture
 def mocked_time_lock_puzzle():
@@ -22,15 +22,15 @@ def mocked_time_lock_puzzle():
         return puzzle
 
 def test_convert_time_lock_puzzle_to_entity(mocked_time_lock_puzzle):
-    """Test conversion of a TimeLockPuzzle instance to TimeLockPuzzleEntity."""
+    """Test conversion of a TimeLockPuzzle instance to TimeLockPuzzleEntity with hex string storage."""
     # Perform the conversion
     entity = convert_time_lock_puzzle_to_entity(mocked_time_lock_puzzle)
     
     # Expected values based on the mocked puzzle's modulus, x, y, and proof
-    expected_modulus = mocked_time_lock_puzzle.N.to_bytes((mocked_time_lock_puzzle.N.bit_length() + 7) // 8, byteorder='big')
-    expected_input = mocked_time_lock_puzzle.x.to_bytes((mocked_time_lock_puzzle.x.bit_length() + 7) // 8, byteorder='big')
-    expected_output = mocked_time_lock_puzzle.y.to_bytes((mocked_time_lock_puzzle.y.bit_length() + 7) // 8, byteorder='big')
-    expected_proof = [p.to_bytes((p.bit_length() + 7) // 8, byteorder='big') for p in mocked_time_lock_puzzle.proof]
+    expected_modulus = mocked_time_lock_puzzle.N.digits(16)
+    expected_input = mocked_time_lock_puzzle.x.digits(16)
+    expected_output = mocked_time_lock_puzzle.y.digits(16)
+    expected_proof = [p.digits(16) for p in mocked_time_lock_puzzle.proof]
 
     # Assertions
     assert isinstance(entity, TimeLockPuzzleEntity)

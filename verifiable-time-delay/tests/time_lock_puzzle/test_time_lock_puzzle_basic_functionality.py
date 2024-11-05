@@ -3,7 +3,7 @@ import pytest
 from gmpy2 import mpz
 
 
-from time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
+from src.time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
 
 
 @pytest.fixture

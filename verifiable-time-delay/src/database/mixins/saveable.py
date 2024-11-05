@@ -1,4 +1,4 @@
-from database.database import save_instance
+from src.database.database import save_instance
 
 
 class Saveable:

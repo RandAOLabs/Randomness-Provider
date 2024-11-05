@@ -29,6 +29,13 @@ Ensure that gmpy2 is installed. If you encounter issues, you may need to install
 ```bash
 sudo apt-get install libgmp-dev libmpfr-dev
 ```
+
+## Initializing database
+```bash
+python src/database/initialize_db.py
+```
+
+
 ## Running the Project
 To generate a VDF proof and verify it, run the main.py script:
 ```bash
