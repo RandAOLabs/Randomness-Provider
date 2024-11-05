@@ -5,6 +5,22 @@ This guide will walk you through setting up and running the Verifiable Delay Fun
  - Python 3.7+: Make sure you have Python installed on your system.
  - GMPY2: This library is required for high-performance modular arithmetic. It provides bindings to the GMP library for Python.
 
+## Setting Up a Virtual Environment
+It’s recommended to use a virtual environment to manage dependencies for this project.
+1. Create the Virtual Environment:
+```bash
+python3 -m venv venv
+```
+2. Activate the Virtual Environment:
+ - On macOS and Linux:
+```bash
+source venv/bin/activate
+```
+ - On Windows:
+```bash
+.\venv\Scripts\activate
+```
+
 ## Install Dependencies:
 ```bash
 pip install -r requirements.txt
