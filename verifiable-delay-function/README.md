@@ -9,13 +9,14 @@ This VDF implementation is part of **RandAO's Randomness Provider** project, des
 - [License](#license)
 
 ## Overview
+The Verifiable Delay Function (VDF) implemented in this repository follows the specifications in [Pietrzak’s paper](https://doi.org/10.4230/LIPIcs.ITCS.2019.60), providing a cryptographically secure delay mechanism that requires significant serial compute time for generation, yet allows for efficient, parallelized verification. This feature is crucial for applications in decentralized randomness protocols, where it is essential to produce randomness that is both unbiased and verifiable by third parties.
 
-The Verifiable Delay Function (VDF) implemented in this repository follows the specifications in [Pietrzak’s paper](https://doi.org/10.4230/LIPIcs.ITCS.2019.60), offering cryptographically secure, non-parallelizable delay functions that are verifiable by third parties. VDFs have applications in decentralized systems, lotteries, and other systems where reliable and unbiased delay-based randomness is critical.
+Key features of this VDF implementation include:
 
-The VDF consists of:
-- **Time Lock Puzzle Implementation**: The core class used to generate and verify a delayed output.
-- **Parallelized Verification**: Efficient verification using segmented proof calculations to ensure that the time-bound nature of the function holds.
-- **Random State Security**: Secure seeding of the random state for generating unique modulus and challenges, ensuring reliable and cryptographically secure results.
+Serial Computation for Generation: The VDF’s core design requires sequential calculations to produce the delayed output, ensuring that no shortcut can bypass the intended delay.
+Parallelized Verification: The delayed output is verifiable in a parallelized manner, allowing for efficient proof checks even in distributed environments.
+Secure Random State Initialization: Each VDF instance uses secure, unique seeding for generating the modulus and initial challenge, ensuring cryptographic security across executions.
+This approach enables decentralized protocols to produce and verify randomness that is resistant to tampering or premature access, making it ideal for use cases such as secure lotteries, blockchain protocols, and other decentralized applications requiring provable delay-based randomness.
 
 ## Development
 For detailed development guidelines, including contributing, testing, and documentation, please refer to the [Development Documentation](./docs/developing.md).
