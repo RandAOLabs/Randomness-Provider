@@ -13,9 +13,10 @@ The Verifiable Delay Function (VDF) implemented in this repository follows the s
 
 Key features of this VDF implementation include:
 
-Serial Computation for Generation: The VDF’s core design requires sequential calculations to produce the delayed output, ensuring that no shortcut can bypass the intended delay.
-Parallelized Verification: The delayed output is verifiable in a parallelized manner, allowing for efficient proof checks even in distributed environments.
-Secure Random State Initialization: Each VDF instance uses secure, unique seeding for generating the modulus and initial challenge, ensuring cryptographic security across executions.
+ - Serial Computation for Generation: The VDF’s core design requires sequential calculations to produce the delayed output, ensuring that no shortcut can bypass the intended delay.
+ - Parallelized Verification: The delayed output is verifiable in a parallelized manner, allowing for efficient proof checks even in distributed environments.
+ - Secure Random State Initialization: Each VDF instance uses secure, unique seeding for generating the modulus and initial challenge, ensuring cryptographic security across executions.
+ 
 This approach enables decentralized protocols to produce and verify randomness that is resistant to tampering or premature access, making it ideal for use cases such as secure lotteries, blockchain protocols, and other decentralized applications requiring provable delay-based randomness.
 
 ## Development
