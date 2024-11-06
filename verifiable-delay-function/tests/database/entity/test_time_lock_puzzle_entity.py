@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from src.database.database import get_orm_base
-from src.database.entity.time_lock_puzzle_entity import TimeLockPuzzleEntity
+from src.database.entity.verifiable_delay_function_entity import VerifiableDelayFunctionEntity
 
 # Setup in-memory SQLite database for testing
 @pytest.fixture(scope="module")
@@ -22,10 +22,11 @@ def test_database():
     # Teardown: close session and drop tables
     session.close()
     Base.metadata.drop_all(engine)
-def test_time_lock_puzzle_entity_save(test_database):
-    """Test the saving functionality of TimeLockPuzzleEntity with hex strings."""
-    # Create a TimeLockPuzzleEntity instance with hex strings
-    entity = TimeLockPuzzleEntity(
+
+def test_verifiable_delay_function_entity_save(test_database):
+    """Test the saving functionality of VerifiableDelayFunctionEntity with hex strings."""
+    # Create a VerifiableDelayFunctioneEntity instance with hex strings
+    entity = VerifiableDelayFunctionEntity(
         modulus_hex='010203',      # Example modulus hex string
         input_hex='0405',          # Example input hex string
         output_hex='0607',         # Example output hex string
@@ -37,7 +38,7 @@ def test_time_lock_puzzle_entity_save(test_database):
     test_database.commit()
 
     # Verify that the entity was saved and assigned an ID
-    saved_entity = test_database.query(TimeLockPuzzleEntity).filter_by(id=entity.id).first()
+    saved_entity = test_database.query(VerifiableDelayFunctionEntity).filter_by(id=entity.id).first()
     assert saved_entity is not None, "Entity was not saved."
     assert saved_entity.id == entity.id
     assert saved_entity.modulus == '010203'
@@ -45,9 +46,9 @@ def test_time_lock_puzzle_entity_save(test_database):
     assert saved_entity.output == '0607'
     assert saved_entity.proof == ['proof_segment_1', 'proof_segment_2']
 
-def test_time_lock_puzzle_entity_repr():
-    """Test that the __repr__ output of TimeLockPuzzleEntity is not empty."""
-    entity = TimeLockPuzzleEntity(
+def test_verifiable_delay_function_entity_repr():
+    """Test that the __repr__ output of VerifiableDelayFunctionEntity is not empty."""
+    entity = VerifiableDelayFunctionEntity(
         modulus_hex='010203',      # Example modulus hex string
         input_hex='0405',          # Example input hex string
         output_hex='0607',         # Example output hex string

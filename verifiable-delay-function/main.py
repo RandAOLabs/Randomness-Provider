@@ -1,19 +1,17 @@
 import time
-from src.time_lock_puzzle.time_lock_puzzle import TimeLockPuzzle
-from src.database.entity.time_lock_puzzle_entity import TimeLockPuzzleEntity
-from src.converters.time_lock_puzzle_converter import convert_time_lock_puzzle_to_entity
+from src.verifiable_delay_function.verifiable_delay_function import VerifiableDelayFunction
+from src.database.entity.verifiable_delay_function_entity import VerifiableDelayFunctionEntity
+from src.converters.verifiable_delay_function_converter import conver_verifiable_delay_function_to_entity
 from src.protocol_constants import BIT_SIZE, TOTAL_SQUARINGS, NUM_SEGMENTS
 
 def main():
     """
-    Runs the Verifiable Delay Function (VDF) demonstration.
-
     Initializes a VDF with protocol constants. Generates a proof by performing sequential squarings in
     the RSA group, then verifies the proof with parallel verification. Finally, converts the VDF to a
     database entity and saves it.
     """
-    # Initialize TimeLockPuzzle with protocol constants
-    vdf = TimeLockPuzzle(bit_size=BIT_SIZE, T=TOTAL_SQUARINGS, num_segments=NUM_SEGMENTS)
+    # Initialize VerifiableDelayFunction with protocol constants
+    vdf = VerifiableDelayFunction(bit_size=BIT_SIZE, T=TOTAL_SQUARINGS, num_segments=NUM_SEGMENTS)
     print("Generated RSA modulus N:", vdf.N)
 
     # Time the proof generation
@@ -34,8 +32,8 @@ def main():
         print("Verification failed. Aborting save.")
         return
 
-    # Convert the puzzle instance to a TimeLockPuzzleEntity for database storage
-    entity: TimeLockPuzzleEntity = convert_time_lock_puzzle_to_entity(vdf)
+    # Convert the puzzle instance to a VerifiableDelayFunctionEntity for database storage
+    entity: VerifiableDelayFunctionEntity = conver_verifiable_delay_function_to_entity(vdf)
 
     # Save the entity to the database
     entity.save()

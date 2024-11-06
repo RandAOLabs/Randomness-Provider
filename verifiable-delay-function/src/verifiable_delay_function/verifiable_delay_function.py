@@ -5,7 +5,7 @@ from multiprocessing import Pool
 import secrets
 
 
-class TimeLockPuzzle:
+class VerifiableDelayFunction:
     def __init__(self, bit_size: int = 2048, T: int = 1000, num_segments: int = 10):
         # Check if T is divisible by num_segments
         if T % num_segments != 0:

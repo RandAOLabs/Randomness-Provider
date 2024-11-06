@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from src.database.database import get_engine, Base
-from src.database.entity.time_lock_puzzle_entity import TimeLockPuzzleEntity
+from src.database.entity.verifiable_delay_function_entity import VerifiableDelayFunctionEntity
 
 def initialize_database():
     """

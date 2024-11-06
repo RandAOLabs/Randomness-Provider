@@ -9,10 +9,8 @@ from src.database.database import get_orm_base
 # Define the Base class for ORM models
 Base = get_orm_base()
 
-# Define the TimeLockPuzzle model
-# Define the TimeLockPuzzle model
-class TimeLockPuzzleEntity(Base, Saveable):
-    __tablename__ = 'time_lock_puzzles'
+class VerifiableDelayFunctionEntity(Base, Saveable):
+    __tablename__ = 'verifiable_delay_functions'
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))  # Unique generated string ID
     request_id = Column(String, nullable=True)      # Nullable request_id to be filled later
@@ -22,7 +20,7 @@ class TimeLockPuzzleEntity(Base, Saveable):
     proof = Column(JSON, nullable=False)            # Proof as a JSON list of hex strings
 
     def __repr__(self):
-        return (f"<TimeLockPuzzle(id={self.id}, request_id={self.request_id}")
+        return (f"<VerifiableDelayFunction(id={self.id}, request_id={self.request_id}")
     
     def __init__(self, modulus_hex: str, input_hex: str, output_hex: str, proof: List[str]):
         self.modulus = modulus_hex
