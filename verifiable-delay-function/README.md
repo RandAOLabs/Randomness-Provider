@@ -18,7 +18,7 @@ The VDF consists of:
 - **Random State Security**: Secure seeding of the random state for generating unique modulus and challenges, ensuring reliable and cryptographically secure results.
 
 ## Development
-For detailed development guidelines, including contributing, testing, and documentation, please refer to the Development Documentation.
+For detailed development guidelines, including contributing, testing, and documentation, please refer to the [Development Documentation](./docs/developing.md).
 
 ## License
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License. See the [LICENSE file](../LICENSE) for details.
