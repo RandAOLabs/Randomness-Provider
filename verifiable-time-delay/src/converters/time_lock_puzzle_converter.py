@@ -27,8 +27,8 @@ def convert_time_lock_puzzle_to_entity(vdf_instance: TimeLockPuzzle) -> TimeLock
 
     # Create and return a new TimeLockPuzzleEntity instance
     return TimeLockPuzzleEntity(
-        modulus=modulus_hex,
-        input_value=input_hex,
-        output=output_hex,
+        modulus_hex=modulus_hex,
+        input_hex=input_hex,
+        output_hex=output_hex,
         proof=proof_json
     )

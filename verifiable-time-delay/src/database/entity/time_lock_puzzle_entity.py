@@ -1,3 +1,4 @@
+from typing import List
 import uuid
 from sqlalchemy import Column, String, LargeBinary, JSON, Integer
 from sqlalchemy.ext.declarative import declarative_base
@@ -23,8 +24,8 @@ class TimeLockPuzzleEntity(Base, Saveable):
     def __repr__(self):
         return (f"<TimeLockPuzzle(id={self.id}, request_id={self.request_id}")
     
-    def __init__(self, modulus, input_value, output, proof):
-        self.modulus = modulus
-        self.input = input_value
-        self.output = output
+    def __init__(self, modulus_hex: str, input_hex: str, output_hex: str, proof: List[str]):
+        self.modulus = modulus_hex
+        self.input = input_hex
+        self.output = output_hex
         self.proof = proof
