@@ -34,7 +34,6 @@ def test_convert_time_lock_puzzle_to_entity(mocked_time_lock_puzzle):
 
     # Assertions
     assert isinstance(entity, TimeLockPuzzleEntity)
-    assert entity.num_segments == mocked_time_lock_puzzle.num_segments
     assert entity.modulus == expected_modulus
     assert entity.input == expected_input
     assert entity.output == expected_output

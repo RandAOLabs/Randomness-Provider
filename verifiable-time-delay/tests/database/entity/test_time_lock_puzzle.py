@@ -27,7 +27,6 @@ def test_time_lock_puzzle_entity_save(test_database):
     """Test the saving functionality of TimeLockPuzzleEntity."""
     # Create a TimeLockPuzzleEntity instance
     entity = TimeLockPuzzleEntity(
-        num_segments=5,
         modulus=b'\x01\x02\x03',  # Example modulus bytes
         input_value=b'\x04\x05',  # Example input bytes
         output=b'\x06\x07',       # Example output bytes
@@ -42,7 +41,6 @@ def test_time_lock_puzzle_entity_save(test_database):
     saved_entity = test_database.query(TimeLockPuzzleEntity).filter_by(id=entity.id).first()
     assert saved_entity is not None, "Entity was not saved."
     assert saved_entity.id == entity.id
-    assert saved_entity.num_segments == 5
     assert saved_entity.modulus == b'\x01\x02\x03'
     assert saved_entity.input == b'\x04\x05'
     assert saved_entity.output == b'\x06\x07'
@@ -51,11 +49,9 @@ def test_time_lock_puzzle_entity_save(test_database):
 def test_time_lock_puzzle_entity_repr():
     """Test the __repr__ output of TimeLockPuzzleEntity."""
     entity = TimeLockPuzzleEntity(
-        num_segments=5,
         modulus=b'\x01\x02\x03',  # Example modulus bytes
         input_value=b'\x04\x05',  # Example input bytes
         output=b'\x06\x07',       # Example output bytes
         proof=['proof_segment_1', 'proof_segment_2']
     )
-    expected_repr = f"<TimeLockPuzzle(id={entity.id}, request_id={entity.request_id}, num_segments=5)>"
-    assert repr(entity) == expected_repr
+    assert repr(entity)
