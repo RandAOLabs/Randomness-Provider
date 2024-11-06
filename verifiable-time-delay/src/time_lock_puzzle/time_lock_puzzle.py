@@ -2,6 +2,8 @@ import gmpy2
 from gmpy2 import mpz, powmod, random_state, mpz_urandomb
 from typing import Tuple, List
 from multiprocessing import Pool
+import secrets
+
 
 class TimeLockPuzzle:
     def __init__(self, bit_size: int = 2048, T: int = 1000, num_segments: int = 10):
@@ -13,7 +15,11 @@ class TimeLockPuzzle:
         self.T = T
         self.num_segments = num_segments
         self.segment_length = T // num_segments
-        self.rand = random_state()
+        
+        # Seed with a cryptographically secure random integer
+        secure_seed = secrets.randbits(256)
+        self.rand = random_state(secure_seed)
+
         self.N, self.p, self.q = self._generate_rsa_modulus()
         self.x = self._generate_random_challenge()
         self.proof = []
