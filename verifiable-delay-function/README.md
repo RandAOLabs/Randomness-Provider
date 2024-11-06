@@ -1,4 +1,4 @@
-# Verifiable Delay Function (VDF) [🔙](../)
+# [🔙](../) Verifiable Delay Function (VDF) 
 This repository section contains an implementation of the [Verifiable Delay Function](https://doi.org/10.4230/LIPIcs.ITCS.2019.60) as outlined by Krzysztof Pietrzak in the paper *Verifiable Delay Functions* (ITCS 2019).
 
 This VDF implementation is part of **RandAO's Randomness Provider** project, designed to provide a reliable source of randomness based on cryptographic delay. RandAO's Randomness Provider leverages VDFs to ensure that randomness generation is sequential, non-parallelizable, and verifiable, establishing trust and security for applications requiring provably delayed randomness.
