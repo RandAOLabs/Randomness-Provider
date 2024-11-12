@@ -1,0 +1,26 @@
+{
+  "devDependencies": {
+    "@types/dockerode": "^3.3.31",
+    "@types/node": "^22.9.0",
+    "@types/pg": "^8.11.10",
+    "serverless-offline": "^14.3.3",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1692.0",
+    "axios": "^1.7.7",
+    "crypto": "^1.0.1",
+    "dockerode": "^4.0.2",
+    "pg": "^8.13.1"
+  },
+  "name": "ao-vrf",
+  "description": "1. To build:\r ```\r docker build -t serverless-multi-cloud .\r ```",
+  "version": "1.0.0",
+  "main": "Organizer.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

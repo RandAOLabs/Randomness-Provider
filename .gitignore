@@ -1,1 +1,50 @@
+# Ignore virtual environments
 venv/
+.env/
+.env
+env
+
+# Ignore distribution/build directories
+dist/
+build/
+*.egg-info/
+*.pyc
+__pycache__/
+
+# Ignore Node.js dependencies
+node_modules/
+**/node_modules/
+
+# Ignore Terraform and related files
+terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Ignore package locks and dependency files
+package-lock.json
+yarn.lock
+
+# Ignore OS-generated files
+.DS_Store
+Thumbs.db
+
+# Ignore editor-specific files
+.idea/
+.vscode/
+
+# Ignore logs and temporary files
+logs/
+*.log
+temp/
+.tmp/
+*.swp
+
+# Ignore Python bytecode and cache files
+__pycache__/
+*.py[cod]
+
+# Ignore Git-specific large files
+*.pack
+*.idx
+
