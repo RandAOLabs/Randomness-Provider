@@ -24,7 +24,7 @@ const dbConfig = {
 };
 
 // Constants for configuration
-const POLLING_INTERVAL_MS = 500;
+const POLLING_INTERVAL_MS = 100;
 const MINIMUM_ENTRIES = 50;
 const TARGET_ENTRIES = 75;
 const DROP_CHANCE = 0.005;
@@ -259,24 +259,13 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
 async function polling(client: Client): Promise<void> {
     await checkAndFetchIfNeeded(client);
 
-    try {
-        console.log(PROVIDER_ID);
-
-        const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
-        console.log(openRequests);
-
-        if (openRequests && openRequests.activeRequests && openRequests.activeRequests.request_ids) {
-            console.log(openRequests.providerId);
-            console.log(openRequests.activeRequests);
-            console.log(openRequests.activeRequests.request_ids);
-            console.log(openRequests.activeRequests.request_ids.length);
-        } else {
-            console.log('No requests');
-        }
-    } catch (error) {
-        console.error('An error occurred while fetching open random requests:', error);
-    }
-
+    console.log(PROVIDER_ID)
+    var openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID)
+    console.log(openRequests)
+    console.log(openRequests.providerId)
+    console.log(openRequests.activeRequests)
+    console.log(openRequests.activeRequests.request_ids)
+    console.log(openRequests.activeRequests.request_ids.length)
 
     if (Math.random() < DROP_CHANCE) {
         try {

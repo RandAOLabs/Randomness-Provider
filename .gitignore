@@ -3,6 +3,7 @@ venv/
 .env/
 .env
 env
+wallet.json
 
 # Ignore distribution/build directories
 dist/
@@ -10,16 +11,19 @@ build/
 *.egg-info/
 *.pyc
 __pycache__/
+pgdata/
 
 # Ignore Node.js dependencies
 node_modules/
 **/node_modules/
 
 # Ignore Terraform and related files
-terraform/
-**/.terraform/
 *.tfstate
 *.tfstate.backup
+*.exe
+*.lock.*
+LICENSE.txt
+
 
 # Ignore package locks and dependency files
 package-lock.json

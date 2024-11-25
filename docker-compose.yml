@@ -20,7 +20,7 @@ services:
       retries: 5
 
   orchestrator:
-    image: randao/orchestrator:v0.1.3
+    image: randao/orchestrator:v0.1.8
     depends_on:
       postgres:
         condition: service_healthy
@@ -31,17 +31,32 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
       ENVIRONMENT: local
+      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
+      WALLET_JSON: ${WALLET_JSON}
+      PROVIDER_ID: ${PROVIDER_ID}
       DOCKER_NETWORK: backend  # Passing the network name
     networks:
       - backend
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
+      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
+
+  requester:
+    image: randao/requester:v0.1.1
+    environment:
+      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
+      REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
+      PROVIDER_ID: ${PROVIDER_ID}
+      DOCKER_NETWORK: backend  # Passing the network name
+    networks:
+      - backend
+    volumes:
+      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
 
 networks:
   backend:
     name: backend  # This will set the network name explicitly
     driver: bridge
-
 
 volumes:
   pgdata:
