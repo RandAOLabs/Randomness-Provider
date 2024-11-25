@@ -24,7 +24,7 @@ const dbConfig = {
 };
 
 // Constants for configuration
-const POLLING_INTERVAL_MS = 500;
+const POLLING_INTERVAL_MS = 5000;
 const MINIMUM_ENTRIES = 50;
 const TARGET_ENTRIES = 75;
 const DROP_CHANCE = 0.005;
@@ -263,6 +263,7 @@ async function polling(client: Client): Promise<void> {
         console.log(PROVIDER_ID);
 
         const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
+        console.log("here")
         console.log(openRequests);
 
         if (openRequests && openRequests.activeRequests && openRequests.activeRequests.request_ids) {

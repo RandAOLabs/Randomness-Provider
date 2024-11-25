@@ -6,8 +6,8 @@ import {
 } from "ao-process-clients";
 
 const PROVIDER_ID = "XUo8jZtUDBFLtp5okR12oLrqIZ4ewNlTpqnqmriihJE";
-const RETRY_DELAY_MS = 500;
-const CHANCE_TO_CALL_RANDOM = 0.05;
+const RETRY_DELAY_MS = 5000;
+const CHANCE_TO_CALL_RANDOM = 1;
 
 const RANDOM_CONFIG: RandomClientConfig = {
     tokenProcessId: getRandomClientAutoConfiguration().tokenProcessId,
@@ -25,6 +25,7 @@ async function main() {
     const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG);
 
     while (true) {
+        console.log("Running")
         try {
             // Roll for random chance to make a request
             if (Math.random() < CHANCE_TO_CALL_RANDOM) {
