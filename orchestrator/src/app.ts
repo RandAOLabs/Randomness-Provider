@@ -28,11 +28,12 @@ const POLLING_INTERVAL_MS = 5000;
 const MINIMUM_ENTRIES = 50;
 const TARGET_ENTRIES = 75;
 const DROP_CHANCE = 0.005;
-//Expected increments per second=10×0.005=0.05
+//Expected increments per second=10×0.005=0.05
 //180 times per hour
 //4,320 times per day
 //1,576,800 times per year
 const MAX_OUTSTANDING_REQUESTS = 10;
+const MAX_OUTSTANDING_FULFILLMENTS = 10;
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
 const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.0';
@@ -40,11 +41,10 @@ const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
+const ongoingFulfillments = new Set<string>(); // Track request IDs for ongoing fulfillments
 const PROVIDER_ID = process.env.PROVIDER_ID || "0";
-
-
-
 let ongoingRequest = false;
+let spotInterruptions = 0;
 
 // Retry logic for connecting to PostgreSQL
 async function connectWithRetry(): Promise<Client> {
@@ -78,8 +78,6 @@ async function setupDatabase(client: Client): Promise<void> {
     console.log("Database setup complete. 'verifiable_delay_functions' table is ready.");
 }
 
-// Added variable to track the number of Spot instance interruptions
-let spotInterruptions = 0;
 
 // Modified function to trigger VDF job pod using ECS or Docker
 async function triggerVDFJobPod(): Promise<string | null> {
@@ -195,8 +193,6 @@ async function monitorECSTasks(): Promise<void> {
 }
 
 
-
-
 // Function to wait for Docker containers to complete and remove them from tracking
 async function monitorDockerContainers(): Promise<void> {
     if (ongoingContainers.size === 0) return;
@@ -254,8 +250,43 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
         ongoingRequest = false;
     }
 }
+// Function to post VDF challenge and proof
+async function fulfillRandomRequest(client: Client, dbId: string, requestId: string, modulus: string, input: string): Promise<void> {
+    if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) return;
+    ongoingFulfillments.add(dbId);
+    try {
+        console.log(`Posting VDF challenge for entry ID: ${dbId}, request ID: ${requestId}`);
+        await randclient.postVDFChallenge(requestId, modulus, input);
+        console.log(`Challenge posted for request ID: ${requestId}. Waiting to post proof...`);
+        
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        // Fetch the output and proof from the database
+        const res = await client.query('SELECT output, proof FROM verifiable_delay_functions WHERE id = $1', [dbId]);
+        if (!res.rowCount) {
+            console.error(`No entry found for ID: ${dbId}`);
+            return;
+        }
+        const { output, proof } = res.rows[0];
 
-// Polling function to manage entries and delete old ones occasionally
+        // Stringify the proof if it is an array
+        const proofString = Array.isArray(proof) ? JSON.stringify(proof) : proof;
+
+        console.log(`Posting VDF output and proof for request ID: ${requestId}`);
+        await randclient.postVDFOutputAndProof(requestId, output, proofString);
+        console.log(`Proof posted for request ID: ${requestId}`);
+
+        // Delete the entry from the database after successfully posting the proof
+        await client.query('DELETE FROM verifiable_delay_functions WHERE id = $1', [dbId]);
+        console.log(`Entry with ID: ${dbId} deleted from database.`);
+    } catch (error) {
+        console.error(`Error fulfilling random request for entry ID: ${dbId}, request ID: ${requestId}:`, error);
+    } finally {
+        ongoingFulfillments.delete(dbId);
+    }
+}
+
+// Modified polling function to fulfill open requests if they exist
 async function polling(client: Client): Promise<void> {
     await checkAndFetchIfNeeded(client);
 
@@ -263,7 +294,7 @@ async function polling(client: Client): Promise<void> {
         console.log(PROVIDER_ID);
 
         const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
-        console.log("here")
+        console.log("here");
         console.log(openRequests);
 
         if (openRequests && openRequests.activeRequests && openRequests.activeRequests.request_ids) {
@@ -271,33 +302,31 @@ async function polling(client: Client): Promise<void> {
             console.log(openRequests.activeRequests);
             console.log(openRequests.activeRequests.request_ids);
             console.log(openRequests.activeRequests.request_ids.length);
+
+            // Check if there are enough entries in the database to fulfill the requests
+            const res = await client.query('SELECT * FROM verifiable_delay_functions ORDER BY id ASC LIMIT $1', [openRequests.activeRequests.request_ids.length]);
+
+            if (res.rowCount !== null && res.rowCount > 0) {
+                const rowsToProcess = Math.min(res.rowCount, openRequests.activeRequests.request_ids.length);
+
+                for (let i = 0; i < rowsToProcess; i++) {
+                    if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) break;
+
+                    const { id, modulus, input } = res.rows[i];
+                    const requestId = openRequests.activeRequests.request_ids[i];
+                    fulfillRandomRequest(client, id, requestId, modulus, input);
+                }
+            } else {
+                console.log('Not enough entries in the database to fulfill all requests.');
+            }
         } else {
             console.log('No requests');
         }
     } catch (error) {
         console.error('An error occurred while fetching open random requests:', error);
     }
-
-
-    if (Math.random() < DROP_CHANCE) {
-        try {
-            console.log("Randomly chosen to log and delete the oldest entry...");
-            const res = await client.query('SELECT * FROM verifiable_delay_functions ORDER BY id ASC LIMIT 1');
-            const entry = res.rows[0];
-
-            if (entry) {
-                console.log("Logging and deleting oldest entry:", JSON.stringify(entry, null, 2));
-                await client.query('DELETE FROM verifiable_delay_functions WHERE id = $1', [entry.id]);
-                console.log("Oldest entry deleted from database.");
-            } else {
-                console.log("No entries available to delete.");
-            }
-        } catch (error) {
-            console.error('Error logging and deleting oldest entry:', error);
-        }
-    } else {
-    }
 }
+
 
 // Main function
 async function run(): Promise<void> {
@@ -312,8 +341,6 @@ async function run(): Promise<void> {
     setInterval(async () => {
         await polling(client);
     }, POLLING_INTERVAL_MS);
-
-
 
     process.on("SIGTERM", async () => {
         console.log("SIGTERM received. Closing database connection.");
