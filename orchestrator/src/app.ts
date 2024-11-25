@@ -1,6 +1,17 @@
 import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
+import { getRandomClientAutoConfiguration, IRandomClient, RandomClient, RandomClientConfig } from "ao-process-clients"
+
+// const RANDOM_CONFIG: RandomClientConfig = {
+//     tokenProcessId: getRandomClientAutoConfiguration().tokenProcessId,
+//     processId: getRandomClientAutoConfiguration().processId,
+//     wallet: JSON.parse(process.env.WALLET_JSON!),
+//     environment: 'mainnet'
+// }
+const randclient: IRandomClient = RandomClient.autoConfiguration()
+//const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG)
+
 const docker = new Docker();
 
 // Database configuration
@@ -13,7 +24,7 @@ const dbConfig = {
 };
 
 // Constants for configuration
-const POLLING_INTERVAL_MS = 100;
+const POLLING_INTERVAL_MS = 500;
 const MINIMUM_ENTRIES = 50;
 const TARGET_ENTRIES = 75;
 const DROP_CHANCE = 0.005;
@@ -29,6 +40,9 @@ const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
+const PROVIDER_ID = process.env.PROVIDER_ID || "0";
+
+
 
 let ongoingRequest = false;
 
@@ -211,7 +225,9 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
 
         const res = await client.query('SELECT COUNT(*) as count FROM verifiable_delay_functions');
         const currentCount = parseInt(res.rows[0].count, 10);
-
+        const updateAvailableValuesResult = await randclient.updateProviderAvailableValues(currentCount);
+        console.log("Updates onchain: " + updateAvailableValuesResult)
+        console.log(await randclient.getProviderAvailableValues(PROVIDER_ID))
         if (currentCount < MINIMUM_ENTRIES) {
             const entriesNeeded = TARGET_ENTRIES - currentCount;
             console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries to reach ${TARGET_ENTRIES}...`);
@@ -241,6 +257,27 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
 
 // Polling function to manage entries and delete old ones occasionally
 async function polling(client: Client): Promise<void> {
+    await checkAndFetchIfNeeded(client);
+
+    try {
+        console.log(PROVIDER_ID);
+
+        const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
+        console.log(openRequests);
+
+        if (openRequests && openRequests.activeRequests && openRequests.activeRequests.request_ids) {
+            console.log(openRequests.providerId);
+            console.log(openRequests.activeRequests);
+            console.log(openRequests.activeRequests.request_ids);
+            console.log(openRequests.activeRequests.request_ids.length);
+        } else {
+            console.log('No requests');
+        }
+    } catch (error) {
+        console.error('An error occurred while fetching open random requests:', error);
+    }
+
+
     if (Math.random() < DROP_CHANCE) {
         try {
             console.log("Randomly chosen to log and delete the oldest entry...");
@@ -258,7 +295,6 @@ async function polling(client: Client): Promise<void> {
             console.error('Error logging and deleting oldest entry:', error);
         }
     } else {
-        await checkAndFetchIfNeeded(client);
     }
 }
 
@@ -268,13 +304,15 @@ async function run(): Promise<void> {
     await setupDatabase(client);
 
     setInterval(async () => {
-        await polling(client);
-    }, POLLING_INTERVAL_MS);
-
-    setInterval(async () => {
         const res = await client.query('SELECT COUNT(*) as count FROM verifiable_delay_functions');
         console.log(`Periodic log - Current database size: ${res.rows[0].count}`);
     }, 10000);
+
+    setInterval(async () => {
+        await polling(client);
+    }, POLLING_INTERVAL_MS);
+
+
 
     process.on("SIGTERM", async () => {
         console.log("SIGTERM received. Closing database connection.");

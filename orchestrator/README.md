@@ -1,6 +1,6 @@
 cd into repo
 
 docker login
-docker build -t satoshispalace/orchestrator:latest -t satoshispalace/orchestrator:v0.0.30 .
-docker push satoshispalace/orchestrator:v0.0.30
+docker build -t randao/orchestrator:latest -t randao/orchestrator:v0.1.4 .
+docker push satoshispalace/orchestrator:v0.1.4
 docker push satoshispalace/orchestrator:latest
