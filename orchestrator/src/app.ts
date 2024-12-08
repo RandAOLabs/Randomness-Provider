@@ -36,7 +36,7 @@ const MAX_OUTSTANDING_REQUESTS = 10;
 const MAX_OUTSTANDING_FULFILLMENTS = 10;
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
-const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.0';
+const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.1';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
@@ -45,7 +45,7 @@ const ongoingFulfillments = new Set<string>(); // Track request IDs for ongoing 
 const PROVIDER_ID = process.env.PROVIDER_ID || "0";
 let ongoingRequest = false;
 let spotInterruptions = 0;
-
+let totalProvided = 0;
 // Retry logic for connecting to PostgreSQL
 async function connectWithRetry(): Promise<Client> {
     const client = new Client(dbConfig);
@@ -64,6 +64,13 @@ async function connectWithRetry(): Promise<Client> {
 
 // Setup the `verifiable_delay_functions` table if not exists
 async function setupDatabase(client: Client): Promise<void> {
+
+    // // Drop the table if it exists
+    // await client.query(`
+    //     DROP TABLE IF EXISTS verifiable_delay_functions;
+    // `);
+    // console.log("'verifiable_delay_functions' table dropped.");
+
     await client.query(`
         CREATE TABLE IF NOT EXISTS verifiable_delay_functions (
             id TEXT PRIMARY KEY,  -- Define as TEXT to match UUID format
@@ -218,9 +225,10 @@ async function monitorDockerContainers(): Promise<void> {
 async function checkAndFetchIfNeeded(client: Client): Promise<void> {
     try {
         if (ongoingRequest) return;
+        const res = await client.query('SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL');
+        const currentCount = parseInt(res.rows[0].count, 10); // Parse the count as an integer
+        console.log("Total usable db entries: " + currentCount);
 
-        const res = await client.query('SELECT COUNT(*) as count FROM verifiable_delay_functions');
-        const currentCount = parseInt(res.rows[0].count, 10);
         const updateAvailableValuesResult = await randclient.updateProviderAvailableValues(currentCount);
         console.log("Updates onchain: " + updateAvailableValuesResult)
         console.log(await randclient.getProviderAvailableValues(PROVIDER_ID))
@@ -250,25 +258,66 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
         ongoingRequest = false;
     }
 }
-// Function to post VDF challenge and proof
-async function fulfillRandomRequest(client: Client, dbId: string, requestId: string, modulus: string, input: string): Promise<void> {
-    if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) return;
-    ongoingFulfillments.add(dbId);
+
+// Function to clear all output requests
+async function clearAllOutputRequests(client: Client): Promise<void> {
     try {
+        // Fetch the current open output requests
+        const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
+        console.log("Open requests fetched:", openRequests);
+
+        if (openRequests && openRequests.activeOutputRequests) {
+            openRequests.activeOutputRequests.request_ids.forEach((requestId) => {
+                console.log(`Sending "No data" for output request ID: ${requestId}`);
+
+                // Send "No data" as output for each request (do not await, fire and forget)
+                randclient.postVDFOutputAndProof(requestId, "No data", "No data").then(() => {
+                    console.log(`"No data" sent for request ID: ${requestId}`);
+                }).catch((error) => {
+                    console.error(`Error sending "No data" for request ID: ${requestId}:`, error);
+                });
+            });
+        } else {
+            console.log('No Output requests to clear');
+        }
+    } catch (error) {
+        console.error('An error occurred while clearing output requests:', error);
+    }
+}
+
+
+// Function to post VDF challenge
+async function fulfillRandomChallenge(client: Client, dbId: string, requestId: string, modulus: string, input: string): Promise<void> {
+    if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) return;
+
+    try {
+        // Assume dbId, requestId, modulus, and input are passed in as parameters
+
+        console.log(`Received entry details - ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
+
+
         console.log(`Posting VDF challenge for entry ID: ${dbId}, request ID: ${requestId}`);
         await randclient.postVDFChallenge(requestId, modulus, input);
         console.log(`Challenge posted for request ID: ${requestId}. Waiting to post proof...`);
-        
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        
-        // Fetch the output and proof from the database
-        const res = await client.query('SELECT output, proof FROM verifiable_delay_functions WHERE id = $1', [dbId]);
+    } catch (error) {
+        console.error(`Error posting VDF challenge for request ID: ${requestId}:`, error);
+    }
+}
+
+
+// Function to post VDF output and proof
+async function fulfillRandomOutput(client: Client, requestId: string): Promise<void> {
+    try {
+        // Fetch the output and proof from the database using the requestId
+        const res = await client.query('SELECT id, output, proof FROM verifiable_delay_functions WHERE request_id = $1', [requestId]);
         if (!res.rowCount) {
-            console.error(`No entry found for ID: ${dbId}`);
+            console.error(`No entry found for request ID: ${requestId}`);
             return;
         }
-        const { output, proof } = res.rows[0];
+        const { id: dbId, output, proof } = res.rows[0];
 
+        // console.log(`Fetched entry from database for output - ID: ${dbId}, Output: ${output}, Proof: ${proof}`);
+        console.log(`Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}`);
         // Stringify the proof if it is an array
         const proofString = Array.isArray(proof) ? JSON.stringify(proof) : proof;
 
@@ -276,56 +325,93 @@ async function fulfillRandomRequest(client: Client, dbId: string, requestId: str
         await randclient.postVDFOutputAndProof(requestId, output, proofString);
         console.log(`Proof posted for request ID: ${requestId}`);
 
-        // Delete the entry from the database after successfully posting the proof
-        await client.query('DELETE FROM verifiable_delay_functions WHERE id = $1', [dbId]);
-        console.log(`Entry with ID: ${dbId} deleted from database.`);
-    } catch (error) {
-        console.error(`Error fulfilling random request for entry ID: ${dbId}, request ID: ${requestId}:`, error);
-    } finally {
         ongoingFulfillments.delete(dbId);
+    } catch (error) {
+        console.error(`Error fulfilling random output for request ID: ${requestId}:`, error);
     }
 }
 
 // Modified polling function to fulfill open requests if they exist
 async function polling(client: Client): Promise<void> {
+    console.log("Starting Polling...")
     await checkAndFetchIfNeeded(client);
 
     try {
         console.log(PROVIDER_ID);
 
+        // Part 1: Fetch open requests
         const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
-        console.log("here");
-        console.log(openRequests);
+        console.log("Open requests fetched:", openRequests);
+        if (false) {
+            clearAllOutputRequests(client)
+        }
+        else {
 
-        if (openRequests && openRequests.activeRequests && openRequests.activeRequests.request_ids) {
-            console.log(openRequests.providerId);
-            console.log(openRequests.activeRequests);
-            console.log(openRequests.activeRequests.request_ids);
-            console.log(openRequests.activeRequests.request_ids.length);
 
-            // Check if there are enough entries in the database to fulfill the requests
-            const res = await client.query('SELECT * FROM verifiable_delay_functions ORDER BY id ASC LIMIT $1', [openRequests.activeRequests.request_ids.length]);
 
-            if (res.rowCount !== null && res.rowCount > 0) {
-                const rowsToProcess = Math.min(res.rowCount, openRequests.activeRequests.request_ids.length);
-
-                for (let i = 0; i < rowsToProcess; i++) {
+            // Part 2: Fulfill Challenge requests
+            if (openRequests && openRequests.activeChallengeRequests) {
+                for (const requestId of openRequests.activeChallengeRequests.request_ids) {
                     if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) break;
+                    try {
+                        // Fetch modulus and input from the database
+                        const res = await client.query('SELECT * FROM verifiable_delay_functions WHERE request_id IS NULL ORDER BY id ASC LIMIT 1');
+                        if (!res.rowCount) {
+                            console.error(`No available entry found in the database.`);
+                            return;
+                        }
+                        const { id: dbId, modulus, input } = res.rows[0];
 
-                    const { id, modulus, input } = res.rows[i];
-                    const requestId = openRequests.activeRequests.request_ids[i];
-                    fulfillRandomRequest(client, id, requestId, modulus, input);
+                        // console.log(`Fetched entry from database - ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
+                        console.log(`Fetched entry from database - ID: ${dbId}, RequestID: ${requestId}`);
+                        // Update the database to save the requestId with the entry
+                        await client.query('UPDATE verifiable_delay_functions SET request_id = $1 WHERE id = $2', [requestId, dbId]);
+                        console.log(`Updated database entry with request ID: ${requestId} for entry ID: ${dbId}`);
+                        ongoingFulfillments.add(dbId);
+                        console.log(`Processing challenge request ID: ${requestId}`);
+                        fulfillRandomChallenge(client, dbId, requestId, modulus, input);
+                    } catch (error) {
+                        console.log(error)
+                    }
                 }
             } else {
-                console.log('Not enough entries in the database to fulfill all requests.');
+                console.log('No Challenge requests');
             }
-        } else {
-            console.log('No requests');
+
+            // Part 3: Fulfill Output requests
+            if (openRequests && openRequests.activeOutputRequests) {
+                for (const requestId of openRequests.activeOutputRequests.request_ids) {
+                    console.log(`Processing output request ID: ${requestId}`);
+                    fulfillRandomOutput(client, requestId);
+                }
+            } else {
+                console.log('No Output requests');
+            }
+
+            // Part 4: Check for completed fulfillments that are no longer in the challenge or output list
+            for (const ongoingId of ongoingFulfillments) {
+                const challengeInProgress = openRequests.activeChallengeRequests?.request_ids.includes(ongoingId);
+                const outputInProgress = openRequests.activeOutputRequests?.request_ids.includes(ongoingId);
+
+                console.log(`Checking ID: ${ongoingId}`);
+                console.log(` - In active challenges: ${challengeInProgress}`);
+                console.log(` - In active outputs: ${outputInProgress}`);
+
+                if (!challengeInProgress && !outputInProgress) {
+                    console.log(`Entry with ID: ${ongoingId} is no longer requested.`);
+                    // await client.query('DELETE FROM verifiable_delay_functions WHERE id = $1', [ongoingId]);
+                    // console.log(`Entry with ID: ${ongoingId} deleted from database.`);
+                    // ongoingFulfillments.delete(ongoingId);
+                    // totalProvided++;
+                    // console.log("total provided = " + totalProvided);
+                }
+            }
         }
     } catch (error) {
         console.error('An error occurred while fetching open random requests:', error);
     }
 }
+
 
 
 // Main function
