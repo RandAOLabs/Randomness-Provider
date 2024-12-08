@@ -30,56 +30,57 @@ async function main() {
             // Roll for random chance to make a request
             if (Math.random() < CHANCE_TO_CALL_RANDOM) {
                 console.log("Initiating random request...");
-                await randclient.createRequest([PROVIDER_ID]);
+                const callbackId = `callback-${Date.now()}`;
+                await randclient.createRequest([PROVIDER_ID], 1, callbackId);
                 totalRandomCalled++;
                 console.log("Random request initiated. Awaiting request ID in open requests...");
             }
 
-            // Check open requests
-            const openRequestsResponse = await randclient.getOpenRandomRequests(PROVIDER_ID);
-            const openRequestIds = openRequestsResponse.activeRequests.request_ids || [];
-            console.log("Open requests:", openRequestIds);
+            // // Check open requests
+            // const openRequestsResponse = await randclient.getOpenRandomRequests(PROVIDER_ID);
+            // const openRequestIds = openRequestsResponse.activeRequests.request_ids || [];
+            // console.log("Open requests:", openRequestIds);
 
-            // Track outstanding requests
-            for (const requestId of openRequestIds) {
-                if (!outstandingRequests.has(requestId)) {
-                    console.log(`Tracking new request: ${requestId}`);
-                    outstandingRequests.add(requestId);
-                }
-            }
+            // // Track outstanding requests
+            // for (const requestId of openRequestIds) {
+            //     if (!outstandingRequests.has(requestId)) {
+            //         console.log(`Tracking new request: ${requestId}`);
+            //         outstandingRequests.add(requestId);
+            //     }
+            // }
 
-            // Check the status of outstanding requests
-            if (outstandingRequests.size > 0) {
-                const randomRequestsResponse = await randclient.getRandomRequests(Array.from(outstandingRequests));
-                const requests = randomRequestsResponse.randomRequestResponses || []; // Adjust based on actual response structure
-                console.log(randomRequestsResponse)
-                console.log(requests)
+            // // Check the status of outstanding requests
+            // if (outstandingRequests.size > 0) {
+            //     const randomRequestsResponse = await randclient.getRandomRequests(Array.from(outstandingRequests));
+            //     const requests = randomRequestsResponse.randomRequestResponses || []; // Adjust based on actual response structure
+            //     console.log(randomRequestsResponse)
+            //     console.log(requests)
 
-                //     for (const request of requests) {
-                //         const requestId = request.requestId; // Adjust if property has a different name
-                //         if (request?.status === "fulfilled") {
-                //             const fulfilledTime = Date.now();
-                //             const timeToFulfill = fulfilledTime - request.createdTime; // Adjust if createdTime exists
-                //             totalTimeToFulfill += timeToFulfill;
-                //             fulfilledRequests++;
-                //             console.log(`Request ${requestId} fulfilled. Time to fulfill: ${timeToFulfill}ms`);
-                //             outstandingRequests.delete(requestId); // Stop tracking fulfilled requests
-                //         } else {
-                //             console.log(`Request ${requestId} is still being processed.`);
-                //         }
-                //     }
-            }
+            //     //     for (const request of requests) {
+            //     //         const requestId = request.requestId; // Adjust if property has a different name
+            //     //         if (request?.status === "fulfilled") {
+            //     //             const fulfilledTime = Date.now();
+            //     //             const timeToFulfill = fulfilledTime - request.createdTime; // Adjust if createdTime exists
+            //     //             totalTimeToFulfill += timeToFulfill;
+            //     //             fulfilledRequests++;
+            //     //             console.log(`Request ${requestId} fulfilled. Time to fulfill: ${timeToFulfill}ms`);
+            //     //             outstandingRequests.delete(requestId); // Stop tracking fulfilled requests
+            //     //         } else {
+            //     //             console.log(`Request ${requestId} is still being processed.`);
+            //     //         }
+            //     //     }
+            // }
 
-            // Calculate and log stats
-            if (fulfilledRequests > 0) {
-                const avgTimeToFulfill = totalTimeToFulfill / fulfilledRequests;
+            // // Calculate and log stats
+            // if (fulfilledRequests > 0) {
+            //     const avgTimeToFulfill = totalTimeToFulfill / fulfilledRequests;
 
-                console.log(`
-                    Total Random Called: ${totalRandomCalled}
-                    Outstanding Requests: ${outstandingRequests.size}
-                    Average Time to Fulfill: ${avgTimeToFulfill}ms
-                `);
-            }
+            //     console.log(`
+            //         Total Random Called: ${totalRandomCalled}
+            //         Outstanding Requests: ${outstandingRequests.size}
+            //         Average Time to Fulfill: ${avgTimeToFulfill}ms
+            //     `);
+            // }
 
             // Wait before next cycle
             await delay(RETRY_DELAY_MS);
