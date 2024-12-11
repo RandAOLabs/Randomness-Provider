@@ -93,10 +93,16 @@ class VerifiableDelayFunction:
         return proof[-1] == y
     ##Private##
     def _generate_rsa_modulus(self) -> Tuple[mpz, mpz, mpz]:
-        p = gmpy2.next_prime(mpz_urandomb(self.rand, self.bit_size // 2))
-        q = gmpy2.next_prime(mpz_urandomb(self.rand, self.bit_size // 2))
-        N = p * q
-        return N, p, q
+        while True:
+            # Generate p and q with slightly fewer bits
+            p = gmpy2.next_prime(mpz_urandomb(self.rand, self.bit_size // 2 - 1))
+            q = gmpy2.next_prime(mpz_urandomb(self.rand, self.bit_size // 2 - 1))
+            
+            N = p * q
+            
+            # Check if N is within the desired bit size
+            if N.bit_length() <= self.bit_size:
+                return N, p, q
 
     def _generate_random_challenge(self) -> mpz:
         return mpz_urandomb(self.rand, self.bit_size // 2)
