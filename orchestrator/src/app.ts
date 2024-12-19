@@ -25,18 +25,17 @@ const dbConfig = {
 
 // Constants for configuration
 const POLLING_INTERVAL_MS = 5000;
-const MINIMUM_ENTRIES = 50;
-const TARGET_ENTRIES = 75;
-const DROP_CHANCE = 0.005;
+const MINIMUM_ENTRIES = 250;
+const TARGET_ENTRIES = 500;
 //Expected increments per second=10×0.005=0.05
 //180 times per hour
 //4,320 times per day
 //1,576,800 times per year
-const MAX_OUTSTANDING_REQUESTS = 10;
-const MAX_OUTSTANDING_FULFILLMENTS = 10;
+const MAX_OUTSTANDING_REQUESTS = 50;
+const MAX_OUTSTANDING_FULFILLMENTS = 50;
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
-const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.1';
+const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.2';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
@@ -209,17 +208,38 @@ async function monitorDockerContainers(): Promise<void> {
             const container = docker.getContainer(containerId);
             const containerInfo = await container.inspect();
 
+            // Check if the container is already stopped (exited)
             if (containerInfo.State.Status === 'exited') {
                 console.log(`Docker container stopped: ${containerId}`);
-                await container.remove();
-                ongoingContainers.delete(containerId);
+
+                // Attempt to remove the container, handling possible errors gracefully
+                try {
+                    await container.remove({ force: true }); // Force removal to avoid "in progress" errors
+                    console.log(`Docker container removed: ${containerId}`);
+                    ongoingContainers.delete(containerId);
+                } catch (removeError) {
+                    if (isDockerError(removeError) && removeError.statusCode === 409) {
+                        // Error 409 means removal is in progress, so skip this container for now
+                        console.log(`Removal of container ${containerId} is already in progress. Skipping.`);
+                    } else {
+                        // Handle other errors that might occur during container removal
+                        console.error(`Error removing Docker container ${containerId}:`, removeError);
+                    }
+                }
             }
         } catch (error) {
-            console.error(`Error monitoring Docker container ${containerId}:`, error);
+            console.error(`Error inspecting Docker container ${containerId}:`, error);
             ongoingContainers.delete(containerId); // Remove from tracking if there's an error (e.g., container not found)
         }
     }
 }
+
+// Helper function to type guard Docker errors
+function isDockerError(error: unknown): error is { statusCode: number } {
+    return typeof error === 'object' && error !== null && 'statusCode' in error && typeof (error as any).statusCode === 'number';
+}
+
+
 
 // Function to check if there are fewer than MINIMUM_ENTRIES and fetch until TARGET_ENTRIES
 async function checkAndFetchIfNeeded(client: Client): Promise<void> {
@@ -321,7 +341,7 @@ async function fulfillRandomOutput(client: Client, requestId: string): Promise<v
         // Stringify the proof if it is an array
         const proofString = Array.isArray(proof) ? JSON.stringify(proof) : proof;
 
-        console.log(`Posting VDF output and proof for request ID: ${requestId}`);
+        console.log(`Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
         await randclient.postVDFOutputAndProof(requestId, output, proofString);
         console.log(`Proof posted for request ID: ${requestId}`);
 
@@ -333,7 +353,7 @@ async function fulfillRandomOutput(client: Client, requestId: string): Promise<v
 
 // Modified polling function to fulfill open requests if they exist
 async function polling(client: Client): Promise<void> {
-    console.log("Starting Polling...")
+    console.log("Starting Polling...");
     await checkAndFetchIfNeeded(client);
 
     try {
@@ -342,16 +362,15 @@ async function polling(client: Client): Promise<void> {
         // Part 1: Fetch open requests
         const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
         console.log("Open requests fetched:", openRequests);
+
         if (false) {
-            clearAllOutputRequests(client)
-        }
-        else {
-
-
+            clearAllOutputRequests(client);
+        } else {
 
             // Part 2: Fulfill Challenge requests
             if (openRequests && openRequests.activeChallengeRequests) {
                 for (const requestId of openRequests.activeChallengeRequests.request_ids) {
+                    console.log("Max outstanding is "+ MAX_OUTSTANDING_FULFILLMENTS)
                     if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) break;
                     try {
                         // Fetch modulus and input from the database
@@ -362,16 +381,15 @@ async function polling(client: Client): Promise<void> {
                         }
                         const { id: dbId, modulus, input } = res.rows[0];
 
-                        // console.log(`Fetched entry from database - ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
                         console.log(`Fetched entry from database - ID: ${dbId}, RequestID: ${requestId}`);
                         // Update the database to save the requestId with the entry
                         await client.query('UPDATE verifiable_delay_functions SET request_id = $1 WHERE id = $2', [requestId, dbId]);
                         console.log(`Updated database entry with request ID: ${requestId} for entry ID: ${dbId}`);
                         ongoingFulfillments.add(dbId);
                         console.log(`Processing challenge request ID: ${requestId}`);
-                        fulfillRandomChallenge(client, dbId, requestId, modulus, input);
+                        await fulfillRandomChallenge(client, dbId, requestId, modulus, input);
                     } catch (error) {
-                        console.log(error)
+                        console.log(error);
                     }
                 }
             } else {
@@ -388,7 +406,9 @@ async function polling(client: Client): Promise<void> {
                 console.log('No Output requests');
             }
 
+
             // Part 4: Check for completed fulfillments that are no longer in the challenge or output list
+            const noLongerUsedIds: string[] = [];
             for (const ongoingId of ongoingFulfillments) {
                 const challengeInProgress = openRequests.activeChallengeRequests?.request_ids.includes(ongoingId);
                 const outputInProgress = openRequests.activeOutputRequests?.request_ids.includes(ongoingId);
@@ -398,12 +418,18 @@ async function polling(client: Client): Promise<void> {
                 console.log(` - In active outputs: ${outputInProgress}`);
 
                 if (!challengeInProgress && !outputInProgress) {
-                    console.log(`Entry with ID: ${ongoingId} is no longer requested.`);
-                    // await client.query('DELETE FROM verifiable_delay_functions WHERE id = $1', [ongoingId]);
-                    // console.log(`Entry with ID: ${ongoingId} deleted from database.`);
-                    // ongoingFulfillments.delete(ongoingId);
-                    // totalProvided++;
-                    // console.log("total provided = " + totalProvided);
+                    noLongerUsedIds.push(ongoingId);
+                }
+            }
+
+            // Log all IDs that are no longer in use in a single line
+            if (noLongerUsedIds.length > 0) {
+                console.log(`No longer in use: ${noLongerUsedIds.join(', ')}`);
+                // Optionally remove them from the ongoing fulfillments list if necessary
+                for (const id of noLongerUsedIds) {
+                    console.log("Removing id from list:" + id)
+                    //await client.query('DELETE FROM verifiable_delay_functions WHERE id = $1', [id]);
+                    ongoingFulfillments.delete(id);
                 }
             }
         }
@@ -411,6 +437,7 @@ async function polling(client: Client): Promise<void> {
         console.error('An error occurred while fetching open random requests:', error);
     }
 }
+
 
 
 
