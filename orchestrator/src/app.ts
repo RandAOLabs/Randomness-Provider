@@ -3,14 +3,14 @@ import Docker from 'dockerode';
 import AWS from 'aws-sdk';
 import { getRandomClientAutoConfiguration, IRandomClient, RandomClient, RandomClientConfig } from "ao-process-clients"
 
-// const RANDOM_CONFIG: RandomClientConfig = {
-//     tokenProcessId: getRandomClientAutoConfiguration().tokenProcessId,
-//     processId: getRandomClientAutoConfiguration().processId,
-//     wallet: JSON.parse(process.env.WALLET_JSON!),
-//     environment: 'mainnet'
-// }
-const randclient: IRandomClient = RandomClient.autoConfiguration()
-//const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG)
+const RANDOM_CONFIG: RandomClientConfig = {
+    tokenProcessId: getRandomClientAutoConfiguration().tokenProcessId,
+    processId: "vgH7EXVs6-vxxilja6lkBruHlgOkyqddFVg-BVp3eJc",
+    wallet: JSON.parse(process.env.WALLET_JSON!),
+    environment: 'mainnet'
+}
+//const randclient: IRandomClient = RandomClient.autoConfiguration()
+const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG)
 
 const docker = new Docker();
 
@@ -35,7 +35,7 @@ const MAX_OUTSTANDING_REQUESTS = 50;
 const MAX_OUTSTANDING_FULFILLMENTS = 50;
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
-const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.2';
+const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.4';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
@@ -83,7 +83,6 @@ async function setupDatabase(client: Client): Promise<void> {
     `);
     console.log("Database setup complete. 'verifiable_delay_functions' table is ready.");
 }
-
 
 // Modified function to trigger VDF job pod using ECS or Docker
 async function triggerVDFJobPod(): Promise<string | null> {
@@ -198,7 +197,6 @@ async function monitorECSTasks(): Promise<void> {
     });
 }
 
-
 // Function to wait for Docker containers to complete and remove them from tracking
 async function monitorDockerContainers(): Promise<void> {
     if (ongoingContainers.size === 0) return;
@@ -239,7 +237,30 @@ function isDockerError(error: unknown): error is { statusCode: number } {
     return typeof error === 'object' && error !== null && 'statusCode' in error && typeof (error as any).statusCode === 'number';
 }
 
+// Function to process hex output for 64-bit modulus
+function hexMod64Bit(expectedOutput: string): { expectedOutput64BitBase10: string } {
+    // Parse the hexadecimal string into a BigInt
+    const number = BigInt(`0x${expectedOutput}`);
+    
+    // Define the 64-bit modulus (2^64 - 1)
+    const modulus = BigInt("0xFFFFFFFFFFFFFFFF");
+    
+    // Keep dividing by modulus until we get a remainder less than modulus
+    let remainder = number;
+    while (remainder >= modulus) {
+        remainder = remainder % modulus;
+    }
+    
+    // Return the remainder in base 10
+    return {
+        expectedOutput64BitBase10: remainder.toString(),
+    };
+}
 
+// Function to prepend 0x to hex strings
+function addHexPrefix(value: string): string {
+    return value.startsWith('0x') ? value : `0x${value}`;
+}
 
 // Function to check if there are fewer than MINIMUM_ENTRIES and fetch until TARGET_ENTRIES
 async function checkAndFetchIfNeeded(client: Client): Promise<void> {
@@ -249,9 +270,17 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
         const currentCount = parseInt(res.rows[0].count, 10); // Parse the count as an integer
         console.log("Total usable db entries: " + currentCount);
 
-        const updateAvailableValuesResult = await randclient.updateProviderAvailableValues(currentCount);
-        console.log("Updates onchain: " + updateAvailableValuesResult)
-        console.log(await randclient.getProviderAvailableValues(PROVIDER_ID))
+        // Only try to update available values if we have some entries
+        if (currentCount > 0) {
+            try {
+                const updateAvailableValuesResult = await randclient.updateProviderAvailableValues(currentCount);
+                console.log("Updates onchain: " + updateAvailableValuesResult);
+                console.log(await randclient.getProviderAvailableValues(PROVIDER_ID));
+            } catch (error) {
+                console.log("Warning: Could not update available values:", error);
+            }
+        }
+
         if (currentCount < MINIMUM_ENTRIES) {
             const entriesNeeded = TARGET_ENTRIES - currentCount;
             console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries to reach ${TARGET_ENTRIES}...`);
@@ -267,7 +296,7 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
                     const taskArn = await triggerVDFJobPod();
                     if (taskArn) {
                         tasksTriggered++;
-                        console.log(`Task triggered: ${taskArn}. Total ongoing tasks: ${ongoingTasks.size}. Total ongoing containers ${+ ongoingContainers.size}`);
+                        console.log(`Task triggered: ${taskArn}. Total ongoing tasks: ${ongoingTasks.size}. Total ongoing containers ${+ongoingContainers.size}`);
                     }
                 }
             }
@@ -305,25 +334,24 @@ async function clearAllOutputRequests(client: Client): Promise<void> {
     }
 }
 
-
 // Function to post VDF challenge
 async function fulfillRandomChallenge(client: Client, dbId: string, requestId: string, modulus: string, input: string): Promise<void> {
     if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) return;
 
     try {
-        // Assume dbId, requestId, modulus, and input are passed in as parameters
-
         console.log(`Received entry details - ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
 
+        // Add hex prefix to modulus and input
+        const hexModulus = addHexPrefix(modulus);
+        const hexInput = addHexPrefix(input);
 
         console.log(`Posting VDF challenge for entry ID: ${dbId}, request ID: ${requestId}`);
-        await randclient.postVDFChallenge(requestId, modulus, input);
+        await randclient.postVDFChallenge(requestId, hexModulus, hexInput);
         console.log(`Challenge posted for request ID: ${requestId}. Waiting to post proof...`);
     } catch (error) {
         console.error(`Error posting VDF challenge for request ID: ${requestId}:`, error);
     }
 }
-
 
 // Function to post VDF output and proof
 async function fulfillRandomOutput(client: Client, requestId: string): Promise<void> {
@@ -336,13 +364,20 @@ async function fulfillRandomOutput(client: Client, requestId: string): Promise<v
         }
         const { id: dbId, output, proof } = res.rows[0];
 
-        // console.log(`Fetched entry from database for output - ID: ${dbId}, Output: ${output}, Proof: ${proof}`);
         console.log(`Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}`);
-        // Stringify the proof if it is an array
-        const proofString = Array.isArray(proof) ? JSON.stringify(proof) : proof;
+        
+        // Process the output through hexMod64Bit
+        const processedOutput = hexMod64Bit(output).expectedOutput64BitBase10;
+        console.log(`Processed output: ${processedOutput}  For request ID: ${requestId}`);
+        // Process the proof array - add hex prefix to each element
+        let processedProof = proof;
+        if (Array.isArray(proof)) {
+            processedProof = proof.map(element => addHexPrefix(element));
+        }
+        const proofString = JSON.stringify(processedProof);
 
         console.log(`Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
-        await randclient.postVDFOutputAndProof(requestId, output, proofString);
+        await randclient.postVDFOutputAndProof(requestId, processedOutput, proofString);
         console.log(`Proof posted for request ID: ${requestId}`);
 
         ongoingFulfillments.delete(dbId);
@@ -370,7 +405,7 @@ async function polling(client: Client): Promise<void> {
             // Part 2: Fulfill Challenge requests
             if (openRequests && openRequests.activeChallengeRequests) {
                 for (const requestId of openRequests.activeChallengeRequests.request_ids) {
-                    console.log("Max outstanding is "+ MAX_OUTSTANDING_FULFILLMENTS)
+                    console.log("Max outstanding is " + MAX_OUTSTANDING_FULFILLMENTS)
                     if (ongoingFulfillments.size >= MAX_OUTSTANDING_FULFILLMENTS) break;
                     try {
                         // Fetch modulus and input from the database
@@ -437,9 +472,6 @@ async function polling(client: Client): Promise<void> {
         console.error('An error occurred while fetching open random requests:', error);
     }
 }
-
-
-
 
 // Main function
 async function run(): Promise<void> {
