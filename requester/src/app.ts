@@ -5,7 +5,12 @@ import {
     RandomClientConfig,
 } from "ao-process-clients";
 
-const PROVIDER_ID = "XUo8jZtUDBFLtp5okR12oLrqIZ4ewNlTpqnqmriihJE";
+const PROVIDER_IDS = [
+    "XUo8jZtUDBFLtp5okR12oLrqIZ4ewNlTpqnqmriihJE",
+    "vgH7EXVs6-vxxilja6lkBruHlgOkyqddFVg-BVp3eJc",
+    "provider3id" // Replace with actual third provider ID when available
+];
+
 const RETRY_DELAY_MS = 5000;
 const CHANCE_TO_CALL_RANDOM = 1;
 
@@ -21,6 +26,21 @@ let totalTimeToFulfill = 0;
 let fulfilledRequests = 0;
 const outstandingRequests: Set<string> = new Set();
 
+function getRandomProviders(): { providers: string[], count: number } {
+    // Randomly select how many providers we want (1-3)
+    const count = Math.floor(Math.random() * 3) + 1;
+    
+    // Shuffle the provider array and take the first 'count' elements
+    const shuffled = [...PROVIDER_IDS]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, Math.min(count, PROVIDER_IDS.length));
+    
+    return {
+        providers: shuffled,
+        count: shuffled.length
+    };
+}
+
 async function main() {
     const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG);
 
@@ -31,13 +51,15 @@ async function main() {
             if (Math.random() < CHANCE_TO_CALL_RANDOM) {
                 console.log("Initiating random request...");
                 const callbackId = `callback-${Date.now()}`;
-                await randclient.createRequest([PROVIDER_ID], 1, callbackId);
+                const { providers, count } = getRandomProviders();
+                console.log(`Selected ${count} providers:`, providers);
+                await randclient.createRequest(providers, count, callbackId);
                 totalRandomCalled++;
                 console.log("Random request initiated. Awaiting request ID in open requests...");
             }
 
             // // Check open requests
-            // const openRequestsResponse = await randclient.getOpenRandomRequests(PROVIDER_ID);
+            // const openRequestsResponse = await randclient.getOpenRandomRequests(PROVIDER_IDS[0]);
             // const openRequestIds = openRequestsResponse.activeRequests.request_ids || [];
             // console.log("Open requests:", openRequestIds);
 
