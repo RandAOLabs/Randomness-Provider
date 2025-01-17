@@ -1,81 +1,202 @@
 version: '3.8'
 
 services:
-  postgres:
+  # Instance 1
+  postgres1:
     image: postgres:13
     environment:
-      POSTGRES_USER: ${DB_USER:-myuser}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-mypassword}
-      POSTGRES_DB: ${DB_NAME:-mydatabase}
+      POSTGRES_USER: ${DB_USER_1:-myuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD_1:-mypassword}
+      POSTGRES_DB: ${DB_NAME_1:-mydatabase}
     ports:
       - "5432:5432"
     networks:
-      - backend
+      - backend1
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata1:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-myuser} -d ${DB_NAME:-mydatabase}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER_1:-myuser} -d ${DB_NAME_1:-mydatabase}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  orchestrator:
-    image: randao/orchestrator:v0.1.78
+  orchestrator1:
+    image: randao/orchestrator:v0.2.10
     depends_on:
-      postgres:
+      postgres1:
         condition: service_healthy
     environment:
-      DB_HOST: postgres
+      DB_HOST: postgres1
       DB_PORT: 5432
-      DB_USER: ${DB_USER:-myuser}
-      DB_PASSWORD: ${DB_PASSWORD:-mypassword}
-      DB_NAME: ${DB_NAME:-mydatabase}
+      DB_USER: ${DB_USER_1:-myuser}
+      DB_PASSWORD: ${DB_PASSWORD_1:-mypassword}
+      DB_NAME: ${DB_NAME_1:-mydatabase}
       ENVIRONMENT: local
-      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
-      WALLET_JSON: ${WALLET_JSON}
-      PROVIDER_ID: ${PROVIDER_ID}
-      DOCKER_NETWORK: backend  # Passing the network name
+      WALLET_JSON: ${WALLET_JSON_1}
+      PROVIDER_ID: ${PROVIDER_ID_1}
+      DOCKER_NETWORK: backend1
     networks:
-      - backend
+      - backend1
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
-      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
+      - /var/run/docker.sock:/var/run/docker.sock
 
-  requester:
-    image: randao/requester:v0.1.13
-    environment:
-      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
-      REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
-      PROVIDER_ID: ${PROVIDER_ID}
-      DOCKER_NETWORK: backend  # Passing the network name
-    networks:
-      - backend
-    volumes:
-      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
-
-  dbeaver:
+  dbeaver1:
     image: dbeaver/cloudbeaver:23.2.0
     environment:
       CB_SERVER_SERVER_PORT: 8080
-      CB_SERVER_ADMIN_NAME: "admin"
+      CB_SERVER_ADMIN_NAME: "admin1"
       CB_SERVER_ADMIN_PASSWORD: "admin123"
     depends_on:
-      postgres:
+      postgres1:
         condition: service_healthy
     networks:
-      - backend
+      - backend1
     ports:
-      - "8081:8978"  # Expose the DBeaver web UI
+      - "8081:8978"
     volumes:
-      - dbeaver-data:/opt/cloudbeaver/workspace
+      - dbeaver-data1:/opt/cloudbeaver/workspace
+
+  # Instance 2
+  postgres2:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${DB_USER_2:-myuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD_2:-mypassword}
+      POSTGRES_DB: ${DB_NAME_2:-mydatabase}
+    ports:
+      - "5433:5432"
+    networks:
+      - backend2
+    volumes:
+      - pgdata2:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER_2:-myuser} -d ${DB_NAME_2:-mydatabase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orchestrator2:
+    image: randao/orchestrator:v0.2.10
+    depends_on:
+      postgres2:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres2
+      DB_PORT: 5432
+      DB_USER: ${DB_USER_2:-myuser}
+      DB_PASSWORD: ${DB_PASSWORD_2:-mypassword}
+      DB_NAME: ${DB_NAME_2:-mydatabase}
+      ENVIRONMENT: local
+      WALLET_JSON: ${WALLET_JSON_2}
+      PROVIDER_ID: ${PROVIDER_ID_2}
+      DOCKER_NETWORK: backend2
+    networks:
+      - backend2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  dbeaver2:
+    image: dbeaver/cloudbeaver:23.2.0
+    environment:
+      CB_SERVER_SERVER_PORT: 8080
+      CB_SERVER_ADMIN_NAME: "admin2"
+      CB_SERVER_ADMIN_PASSWORD: "admin123"
+    depends_on:
+      postgres2:
+        condition: service_healthy
+    networks:
+      - backend2
+    ports:
+      - "8082:8978"
+    volumes:
+      - dbeaver-data2:/opt/cloudbeaver/workspace
+
+  # Instance 3
+  postgres3:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${DB_USER_3:-myuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD_3:-mypassword}
+      POSTGRES_DB: ${DB_NAME_3:-mydatabase}
+    ports:
+      - "5434:5432"
+    networks:
+      - backend3
+    volumes:
+      - pgdata3:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER_3:-myuser} -d ${DB_NAME_3:-mydatabase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orchestrator3:
+    image: randao/orchestrator:v0.2.10
+    depends_on:
+      postgres3:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres3
+      DB_PORT: 5432
+      DB_USER: ${DB_USER_3:-myuser}
+      DB_PASSWORD: ${DB_PASSWORD_3:-mypassword}
+      DB_NAME: ${DB_NAME_3:-mydatabase}
+      ENVIRONMENT: local
+      WALLET_JSON: ${WALLET_JSON_3}
+      PROVIDER_ID: ${PROVIDER_ID_3}
+      DOCKER_NETWORK: backend3
+    networks:
+      - backend3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  dbeaver3:
+    image: dbeaver/cloudbeaver:23.2.0
+    environment:
+      CB_SERVER_SERVER_PORT: 8080
+      CB_SERVER_ADMIN_NAME: "admin3"
+      CB_SERVER_ADMIN_PASSWORD: "admin123"
+    depends_on:
+      postgres3:
+        condition: service_healthy
+    networks:
+      - backend3
+    ports:
+      - "8083:8978"
+    volumes:
+      - dbeaver-data3:/opt/cloudbeaver/workspace
+
+  requester:
+    image: randao/requester:v0.1.20
+    environment:
+      REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
+  
+  requesterfast:
+    image: randao/requester-fast:v0.1.0
+    environment:
+      REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
 
 networks:
-  backend:
-    name: backend  # This will set the network name explicitly
+  backend1:
+    name: backend1
+    driver: bridge
+  backend2:
+    name: backend2
+    driver: bridge
+  backend3:
+    name: backend3
     driver: bridge
 
 volumes:
-  pgdata:
+  pgdata1:
     driver: local
-  dbeaver-data:
+  pgdata2:
+    driver: local
+  pgdata3:
+    driver: local
+  dbeaver-data1:
+    driver: local
+  dbeaver-data2:
+    driver: local
+  dbeaver-data3:
     driver: local

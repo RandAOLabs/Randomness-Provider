@@ -4,7 +4,7 @@ venv/
 .env
 env
 wallet.json
-
+wallet*.json
 # Ignore distribution/build directories
 dist/
 build/
