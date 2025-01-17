@@ -7,16 +7,16 @@ import {
 
 const PROVIDER_IDS = [
     "XUo8jZtUDBFLtp5okR12oLrqIZ4ewNlTpqnqmriihJE",
-    "vgH7EXVs6-vxxilja6lkBruHlgOkyqddFVg-BVp3eJc",
-    "provider3id" // Replace with actual third provider ID when available
+    "c8Iq4yunDnsJWGSz_wYwQU--O9qeODKHiRdUkQkW2p8",
+    "Sr3HVH0Nh6iZzbORLpoQFOEvmsuKjXsHswSWH760KAk"
 ];
 
-const RETRY_DELAY_MS = 5000;
+const RETRY_DELAY_MS = 600; //1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
 
 const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: getRandomClientAutoConfiguration().tokenProcessId,
-    processId: "vgH7EXVs6-vxxilja6lkBruHlgOkyqddFVg-BVp3eJc",
+    tokenProcessId: "7enZBOhWsyU3A5oCt8HtMNNPHSxXYJVTlOGOetR9IDw",
+    processId: "KbaY8P4h9wdHYKHlBSLbXN_yd-9gxUDxSgBackUxTiQ",
     wallet: JSON.parse(process.env.REQUEST_WALLET_JSON!),
     environment: "mainnet",
 };
