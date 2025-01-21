@@ -41,6 +41,8 @@ let ongoingRequest = false;
 let spotInterruptions = 0;
 let totalProvided = 0;
 let PreviousTotalAvailableRandom = 0;
+const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
 
 // Retry logic for connecting to PostgreSQL
 async function connectWithRetry(): Promise<Client> {
@@ -60,26 +62,27 @@ async function connectWithRetry(): Promise<Client> {
 
 // Setup the `verifiable_delay_functions` table if not exists
 async function setupDatabase(client: Client): Promise<void> {
-
-    // // Drop the table if it exists
-    // await client.query(`
-    //     DROP TABLE IF EXISTS verifiable_delay_functions;
-    // `);
-    // console.log("'verifiable_delay_functions' table dropped.");
-
     await client.query(`
         CREATE TABLE IF NOT EXISTS verifiable_delay_functions (
-            id TEXT PRIMARY KEY,  -- Define as TEXT to match UUID format
+            id TEXT PRIMARY KEY,  
             request_id TEXT,
             modulus TEXT NOT NULL,
             input TEXT NOT NULL,
             output TEXT NOT NULL,
             proof JSON NOT NULL,
-            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            detected_completed TIMESTAMP NULL
         );
     `);
+
+        // Ensure detected_completed column exists in case the table was created before it was added
+        await client.query(`
+            ALTER TABLE verifiable_delay_functions 
+            ADD COLUMN IF NOT EXISTS detected_completed TIMESTAMP NULL;
+        `);
     console.log("Database setup complete. 'verifiable_delay_functions' table is ready.");
 }
+
 
 // Modified function to trigger VDF job pod using ECS or Docker
 async function triggerVDFJobPod(): Promise<string | null> {
@@ -387,26 +390,47 @@ async function polling(client: Client): Promise<void> {
     console.log(`${logId} Starting Polling...`);
 
     try {
+        const startTime = Date.now(); // Start time of polling
+
         console.log(`${logId} Step 1: Fetching open requests from the Randomness Client.`);
+        const step1Start = Date.now();
         const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
+        const step1End = Date.now();
         console.log(`${logId} Step 1: Open Requests: ${JSON.stringify(openRequests)}`);
         console.log(openRequests);
-        console.log(`${logId} Step 1: Open requests fetched.`);
+        console.log(`${logId} Step 1: Open requests fetched. Time taken: ${(step1End - step1Start)}ms`);
 
         // Run Step 2, 3, and 4 concurrently after Step 1
+        const step2Start = Date.now();
         await Promise.all([
-            processChallengeRequests(client, openRequests.activeChallengeRequests, logId),
-            processOutputRequests(client, openRequests.activeOutputRequests, logId),
-            cleanupFulfilledEntries(client, openRequests, logId)
+            (async () => {
+                const s2 = Date.now();
+                await processChallengeRequests(client, openRequests.activeChallengeRequests, logId);
+                console.log(`${logId} Step 2 completed. Time taken: ${Date.now() - s2}ms`);
+            })(),
+            (async () => {
+                const s3 = Date.now();
+                await processOutputRequests(client, openRequests.activeOutputRequests, logId);
+                console.log(`${logId} Step 3 completed. Time taken: ${Date.now() - s3}ms`);
+            })(),
+            (async () => {
+                const s4 = Date.now();
+                await cleanupFulfilledEntries(client, openRequests, logId);
+                console.log(`${logId} Step 4 completed. Time taken: ${Date.now() - s4}ms`);
+            })(),
         ]);
+        const step2End = Date.now();
 
-        console.log(`${logId} Polling cycle completed successfully.`);
+        const totalTime = step2End - startTime;
+        console.log(`${logId} Polling cycle completed successfully. Total time taken: ${totalTime}ms`);
+
     } catch (error) {
         console.error(`${logId} An error occurred during polling:`, error);
     } finally {
         pollingInProgress = false; // Reset flag after execution
     }
 }
+
 
 
 // Step 2: Process Challenge Requests (Database selection & assigning is atomic)
@@ -537,28 +561,68 @@ async function cleanupFulfilledEntries(
     const logId = getLogId();
     console.log(`${logId} Step 4: Checking for fulfilled entries no longer in use.`);
 
-    const noLongerUsedIds: string[] = [];
-    for (const ongoingId of ongoingFulfillments) {
-        const challengeInProgress = openRequests.activeChallengeRequests?.request_ids.includes(ongoingId);
-        const outputInProgress = openRequests.activeOutputRequests?.request_ids.includes(ongoingId);
+    const now = new Date();
+    const cutoffTime = new Date(now.getTime() - COMPLETION_RETENTION_PERIOD_MS);
 
-        if (!challengeInProgress && !outputInProgress) {
-            noLongerUsedIds.push(ongoingId);
+    try {
+        await client.query('BEGIN');
+
+        // Fetch all entries with a request_id
+        const result = await client.query(`
+            SELECT id, request_id, detected_completed 
+            FROM verifiable_delay_functions 
+            WHERE request_id IS NOT NULL
+        `);
+
+        let markForDeletion: string[] = [];
+        let markAsCompleted: string[] = [];
+
+        for (const row of result.rows) {
+            const { id, request_id, detected_completed } = row;
+
+            // Check if this request is still active in challenge or output
+            const isStillInChallenge = openRequests.activeChallengeRequests?.request_ids.includes(request_id);
+            const isStillInOutput = openRequests.activeOutputRequests?.request_ids.includes(request_id);
+
+            if (!isStillInChallenge && !isStillInOutput) {
+                if (!detected_completed) {
+                    // Mark it for deletion by setting detected_completed timestamp
+                    markAsCompleted.push(id);
+                } else if (new Date(detected_completed) < cutoffTime) {
+                    // If already marked and older than retention period, delete it
+                    markForDeletion.push(id);
+                }
+            }
         }
-    }
 
-    if (noLongerUsedIds.length > 0) {
-        console.log(`${logId} No longer in use: ${noLongerUsedIds.join(', ')}`);
-        noLongerUsedIds.forEach((id) => {
-            ongoingFulfillments.delete(id);
-            console.log(`${logId} Removed ID ${id} from ongoing fulfillments.`);
-        });
-    } else {
-        console.log(`${logId} No fulfilled entries to remove.`);
+        // Mark entries as completed
+        if (markAsCompleted.length > 0) {
+            await client.query(`
+                UPDATE verifiable_delay_functions
+                SET detected_completed = NOW()
+                WHERE id = ANY($1)
+            `, [markAsCompleted]);
+            console.log(`${logId} Marked ${markAsCompleted.length} entries as completed.`);
+        }
+
+        // Delete old completed entries
+        if (markForDeletion.length > 0) {
+            await client.query(`
+                DELETE FROM verifiable_delay_functions
+                WHERE id = ANY($1)
+            `, [markForDeletion]);
+            console.log(`${logId} Deleted ${markForDeletion.length} old completed entries.`);
+        }
+
+        await client.query('COMMIT');
+    } catch (error) {
+        console.error(`${logId} Error in cleanupFulfilledEntries:`, error);
+        await client.query('ROLLBACK');
     }
 
     console.log(`${logId} Step 4 completed.`);
 }
+
 
 
 // Main function
