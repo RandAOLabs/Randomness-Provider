@@ -9,7 +9,7 @@ resource "aws_ecs_task_definition" "orchestrator_service" {
 
 container_definitions = jsonencode([{
   name      = "orchestrator"
-  image     = "randao/orchestrator:v0.1.4"
+  image     = "randao/orchestrator:v0.2.0"
   essential = true
   environment = [
     { name = "ENVIRONMENT", value = "cloud" },
@@ -47,7 +47,7 @@ resource "aws_ecs_task_definition" "vdf_job" {
 
 container_definitions = jsonencode([{
   name      = "vdf_job_container"
-  image     = "randao/vdf_job:v0.1.0"
+  image     = "randao/vdf_job:v0.1.4"
   essential = true
   command   = ["python", "main.py"]  # Set the default command to run
   environment = [

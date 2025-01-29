@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "ao-process-clients": "^2.3.1"
+    "ao-process-clients": "^2.3.17"
   },
   "devDependencies": {
     "@types/node": "^22.9.1"
