@@ -1,4 +1,4 @@
-#### Steps to Deploy:
+# Steps to Deploy:
 1. **Install Docker Compose:**  
    Follow the [official Docker Compose installation guide](https://docs.docker.com/compose/install/).
 
