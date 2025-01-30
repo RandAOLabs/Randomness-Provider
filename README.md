@@ -34,12 +34,14 @@ To run a node, the following hardware specifications are required:
 
 ### Option 1: AWS Deployment with Terraform
 This is the recommended method, providing the best performance and uptime at the lowest cost.
+
 [TerraForm setup](./terraform/README.md)
 
 
 
 ### Option 2: Virtual Machine Deployment with Docker Compose
 This option may cost more and depends on the uptime of the hardware you use. It is not recommended for long-term or high-performance node operators.
+
 [Docker-compose setup](./docker-compose/README.md)
 
 
