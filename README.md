@@ -50,18 +50,20 @@ To avoid being slashed, it is critical to run the graceful shutdown script in th
 
 Ensure that your monitoring and alert systems are set up to notify you immediately of any issues.
 
+TODO
+
 ---
 
-By following this guide, you can successfully deploy and maintain a node with optimal uptime and performance. Thank you for contributing to the network's success!
 
-Staking
+## Staking
 
 After successfully setting up your node, you will need to provide proof that the gateway is operational.
 
-Show logs from the node setup to Ethan for verification.
+1. Show logs from the node setup to Ethan for verification.
 
-Upon confirmation, Ethan will provide your provider address with the necessary funds.
+2. Upon confirmation, Ethan will provide your provider address with the necessary funds.
 
-3.Navigate to [Insert link here] to stake your funds and configure your provider information.
+3. Navigate to [Insert link here] to stake your funds and configure your provider information.
 
 By completing this process, you will fully activate your node and ensure it is ready for network participation.
+Thank you for contributing to the network's success!
