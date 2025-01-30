@@ -44,14 +44,17 @@ resource "aws_iam_role_policy" "orchestrator_task_policy" {
         Effect = "Allow"
         Action = [
           "ecs:RunTask",
+          "ecs:StopTask",
           "ecs:DescribeTasks",
+          "ecs:ListTasks",
           "ecs:DescribeTaskDefinition",
-          "ecs:ListTasks"
+          "ecs:ListTaskDefinitions",
+          "ecs:DescribeServices",
+          "ecs:ListServices",
+          "ecs:DescribeClusters",
+          "ecs:ListClusters"
         ]
-        Resource = [
-          "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/vdf-job:*",
-          "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${aws_ecs_cluster.fargate_cluster.name}/*"
-        ]
+        Resource = "*"
       },
       {
         Effect = "Allow"

@@ -5,7 +5,7 @@ import { getRandomClientAutoConfiguration, IRandomClient, RandomClient, RandomCl
 import { dbConfig } from './db_config.js';
 
 const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "7enZBOhWsyU3A5oCt8HtMNNPHSxXYJVTlOGOetR9IDw",
+    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
     processId: "KbaY8P4h9wdHYKHlBSLbXN_yd-9gxUDxSgBackUxTiQ",
     wallet: JSON.parse(process.env.WALLET_JSON!),
     environment: 'mainnet'
@@ -84,46 +84,25 @@ async function setupDatabase(client: Client): Promise<void> {
 }
 
 
+import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
+
+// Cache for network configuration
+let cachedNetworkConfig: NetworkConfig | null = null;
+
 // Modified function to trigger VDF job pod using ECS or Docker
 async function triggerVDFJobPod(): Promise<string | null> {
     if (ENVIRONMENT === 'cloud') {
         try {
             console.log("Cloud environment detected. Launching ECS task.");
-            const result = await ecs.runTask({
-                cluster: process.env.ECS_CLUSTER_NAME || 'fargate-cluster',
-                taskDefinition: 'vdf-job',
-                capacityProviderStrategy: [
-                    {
-                        capacityProvider: 'FARGATE_SPOT',
-                        weight: 1
-                    }
-                ],
-                networkConfiguration: {
-                    awsvpcConfiguration: {
-                        subnets: [process.env.SUBNET_ID || 'subnet-12345678'],
-                        securityGroups: [process.env.SECURITY_GROUP || 'sg-12345678'],
-                        assignPublicIp: 'ENABLED'
-                    }
-                },
-                overrides: {
-                    containerOverrides: [
-                        {
-                            name: 'vdf_job_container',
-                            environment: [
-                                { name: 'DATABASE_TYPE', value: 'postgresql' },
-                                { name: 'DATABASE_HOST', value: process.env.DB_HOST || 'cloud-postgres-host' },
-                                { name: 'DATABASE_PORT', value: process.env.DB_PORT || '5432' },
-                                { name: 'DATABASE_USER', value: process.env.DB_USER || 'myuser' },
-                                { name: 'DATABASE_PASSWORD', value: process.env.DB_PASSWORD || 'mypassword' },
-                                { name: 'DATABASE_NAME', value: process.env.DB_NAME || 'mydatabase' },
-                            ]
-                        }
-                    ]
-                },
-                count: 1
-            }).promise();
+            
+            // Get or refresh network configuration
+            if (!cachedNetworkConfig) {
+                console.log("Fetching network configuration...");
+                cachedNetworkConfig = await getNetworkConfig(ecs);
+                console.log("Network config:", cachedNetworkConfig);
+            }
 
-            const taskArn = result.tasks?.[0]?.taskArn;
+            const taskArn = await launchVDFTask(ecs, cachedNetworkConfig);
             if (taskArn) {
                 ongoingTasks.add(taskArn);
                 console.log(`ECS task started successfully: ${taskArn}`);
@@ -136,6 +115,8 @@ async function triggerVDFJobPod(): Promise<string | null> {
                 console.log(`Spot instance reclaimed by AWS. Total interruptions so far: ${spotInterruptions}`);
             } else {
                 console.error("Error launching ECS task:", error);
+                // Reset network config cache on error to force refresh on next attempt
+                cachedNetworkConfig = null;
             }
             return null;
         }
@@ -269,6 +250,11 @@ async function checkAndFetchIfNeeded(client: Client): Promise<void> {
         const res = await client.query('SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL');
         const currentCount = parseInt(res.rows[0].count, 10);
         console.log("Total usable db entries: " + currentCount);
+        if(PreviousTotalAvailableRandom !=currentCount){
+            console.log(`Updating avalible random values from ${PreviousTotalAvailableRandom} to ${currentCount}`)
+            randclient.updateProviderAvailableValues(currentCount)
+            PreviousTotalAvailableRandom = currentCount;
+        } 
 
         if (currentCount < MINIMUM_ENTRIES) {
             const entriesNeeded = TARGET_ENTRIES - currentCount;
