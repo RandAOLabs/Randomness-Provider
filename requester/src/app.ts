@@ -8,14 +8,15 @@ import {
 const PROVIDER_IDS = [
     "XUo8jZtUDBFLtp5okR12oLrqIZ4ewNlTpqnqmriihJE",
     "c8Iq4yunDnsJWGSz_wYwQU--O9qeODKHiRdUkQkW2p8",
-    "Sr3HVH0Nh6iZzbORLpoQFOEvmsuKjXsHswSWH760KAk"
+    "Sr3HVH0Nh6iZzbORLpoQFOEvmsuKjXsHswSWH760KAk",
+    "1zlA7nKecUGevGNAEbjim_SlbioOI6daNNn2luDEHb0"
 ];
 
-const RETRY_DELAY_MS = 600; //1 minute
+const RETRY_DELAY_MS = 5000; //5 seconds
 const CHANCE_TO_CALL_RANDOM = 1;
 
 const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "7enZBOhWsyU3A5oCt8HtMNNPHSxXYJVTlOGOetR9IDw",
+    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
     processId: "KbaY8P4h9wdHYKHlBSLbXN_yd-9gxUDxSgBackUxTiQ",
     wallet: JSON.parse(process.env.REQUEST_WALLET_JSON!),
     environment: "mainnet",
