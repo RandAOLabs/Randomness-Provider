@@ -1,6 +1,6 @@
 # Node Provider Setup Guide
 
-Welcome to the Node Provider Setup Guide for our software. This document will help you deploy and maintain a node with guaranteed 100% uptime, ensuring optimal network performance and compliance.
+This guide will walk you through getting your randomness provider set up and connected to the network so you can start contributing to the protocal and participating in decentralized randomness!
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -15,7 +15,14 @@ Welcome to the Node Provider Setup Guide for our software. This document will he
 ## Introduction
 As a node provider, you are responsible for ensuring 100% uptime. In the event of downtime, it is mandatory to run the graceful shutdown script to prevent being slashed.
 
-This guide will help you set up and manage your node efficiently.
+Your provider does 3 main things.
+1. It updates the amount of avalible random it has stored on chain. Each random takes a fair biot of compute to create so that it can be compliant to our commit reveal time delay scheme. 
+2. It detects someone has requested random from you and it provides the input number to your time delay function. This is not the final random number.
+3. It detects all parties have submited their input number and then it provides the output number as well as the proof of history checkpoints to the chain to be verified. This output is the random number that will be used on chain. 
+
+It will do these three steps as fast as it can inorder to get the complete random on chain as quickly as possible. Faster providers will be incentivised for their speed and slower ones will been penalized. If a provider is too slow for step 2 it will be slashed a small amount. If a provider is too slow for step 3 they will be considered malicious and slashed heavily.
+
+In the event you need to take your provider offline you must run the gracefull shutdown which will run step 1 once with a value of -1 indicating you are no longer offering random. After that your node will finish all requests in step 2 and 3 then turn off.
 
 ---
 
@@ -30,13 +37,18 @@ To run a node, the following hardware specifications are required:
 
 ---
 
+
+## What the hardware runs
+The hardware you stand up runs 3 services. It stands up a provider. A database for the provider and it spins up temporary jobs to generate random and store it in the database.
+In AWS the cheapest and highest performance solution is used for each of these. when running with docekr compose your machinbe will run each of these services itself in a containerized environment. Quick and scalable but not as cheap or efficient as the AWS solution.
+
+
 ## Deployment Options
 
 ### Option 1: AWS Deployment with Terraform
 This is the recommended method, providing the best performance and uptime at the lowest cost.
 
 [TerraForm setup](./terraform/README.md)
-
 
 
 ### Option 2: Virtual Machine Deployment with Docker Compose
@@ -46,11 +58,13 @@ This option may cost more and depends on the uptime of the hardware you use. It 
 
 
 ## Graceful Shutdown Policy
-To avoid being slashed, it is critical to run the graceful shutdown script in the event of downtime. Failing to do so may result in penalties.
+To avoid being slashed, it is critical to run the graceful shutdown in the event of downtime. Failing to do so may result in penalties.
 
-Ensure that your monitoring and alert systems are set up to notify you immediately of any issues.
+To run this go to "TODO" and navigate to your node and select the "SHUT DOWN" button and sign the transaction. 
+This will tell your provider to stop serving random. 
 
-TODO
+After the maintinance is done and your provider is back up again click "START UP" button. 
+This will tell your provider to start serving random. 
 
 ---
 

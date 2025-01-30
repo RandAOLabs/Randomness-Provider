@@ -20,7 +20,7 @@ services:
       retries: 5
 
   orchestrator:
-    image: randao/orchestrator:v0.1.78
+    image: randao/orchestrator:v0.2.18
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,34 +41,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
       - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
 
-  requester:
-    image: randao/requester:v0.1.13
-    environment:
-      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
-      REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
-      PROVIDER_ID: ${PROVIDER_ID}
-      DOCKER_NETWORK: backend  # Passing the network name
-    networks:
-      - backend
-    volumes:
-      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
-
-  dbeaver:
-    image: dbeaver/cloudbeaver:23.2.0
-    environment:
-      CB_SERVER_SERVER_PORT: 8080
-      CB_SERVER_ADMIN_NAME: "admin"
-      CB_SERVER_ADMIN_PASSWORD: "admin123"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - backend
-    ports:
-      - "8081:8978"  # Expose the DBeaver web UI
-    volumes:
-      - dbeaver-data:/opt/cloudbeaver/workspace
-
 networks:
   backend:
     name: backend  # This will set the network name explicitly
@@ -76,6 +48,4 @@ networks:
 
 volumes:
   pgdata:
-    driver: local
-  dbeaver-data:
     driver: local
