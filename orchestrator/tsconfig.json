@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "module": "commonjs",
+    "target": "es6",
+    "strict": true,
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "declaration": true
+  },
+  "include": [
+    "src/**/*.ts"
+, "src/db_config.ts", "src/clear_all_output_requests.ts", "src/reset_db.mjs"  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
