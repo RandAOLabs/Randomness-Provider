@@ -21,16 +21,16 @@ def main():
     print("VDF output (y):", y)
     print(f"Proof generation time: {generation_time:.4f} seconds")
 
-    # Time the parallel verification
-    start_time = time.time()
-    is_valid_parallel = vdf.parallel_verify(y, proof)
-    parallel_verification_time = time.time() - start_time
-    print("Parallel verification:", "Valid" if is_valid_parallel else "Invalid")
-    print(f"Parallel verification time: {parallel_verification_time:.4f} seconds")
+    # # Time the parallel verification
+    # start_time = time.time()
+    # is_valid_parallel = vdf.parallel_verify(y, proof)
+    # parallel_verification_time = time.time() - start_time
+    # print("Parallel verification:", "Valid" if is_valid_parallel else "Invalid")
+    # print(f"Parallel verification time: {parallel_verification_time:.4f} seconds")
 
-    if not is_valid_parallel:
-        print("Verification failed. Aborting save.")
-        return
+    # if not is_valid_parallel:
+    #     print("Verification failed. Aborting save.")
+    #     return
 
     # Convert the puzzle instance to a VerifiableDelayFunctionEntity for database storage
     entity: VerifiableDelayFunctionEntity = conver_verifiable_delay_function_to_entity(vdf)

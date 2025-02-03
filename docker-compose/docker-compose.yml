@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${DB_USER:-myuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-mypassword}
+      POSTGRES_DB: ${DB_NAME:-mydatabase}
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-myuser} -d ${DB_NAME:-mydatabase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orchestrator:
+    image: randao/orchestrator:v0.2.46
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-myuser}
+      DB_PASSWORD: ${DB_PASSWORD:-mypassword}
+      DB_NAME: ${DB_NAME:-mydatabase}
+      ENVIRONMENT: local
+      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
+      WALLET_JSON: ${WALLET_JSON}
+      PROVIDER_ID: ${PROVIDER_ID}
+      DOCKER_NETWORK: backend  # Passing the network name
+    networks:
+      - backend
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
+      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
+
+networks:
+  backend:
+    name: backend  # This will set the network name explicitly
+    driver: bridge
+
+volumes:
+  pgdata:
+    driver: local

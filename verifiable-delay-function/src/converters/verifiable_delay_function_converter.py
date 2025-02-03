@@ -1,4 +1,5 @@
 from typing import List
+from gmpy2 import mpz
 from src.database.entity.verifiable_delay_function_entity import VerifiableDelayFunctionEntity
 from src.verifiable_delay_function.verifiable_delay_function import VerifiableDelayFunction
 
