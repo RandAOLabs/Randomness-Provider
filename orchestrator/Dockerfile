@@ -1,23 +1,23 @@
-# Use the official Node.js image as the base image
-FROM node:20
+# Use the official lightweight Node.js image
+FROM node:20-bullseye-slim
 
-# Create and set the working directory
+# Create a working directory
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json
+# Copy package files first to leverage Docker layer caching
 COPY package*.json ./
 
-# Install dependencies
+# Install dependencies including dev dependencies (TypeScript)
 RUN npm install
 
-# Copy the entire project into the container
+# Copy the source files
 COPY . .
 
-# Compile TypeScript to JavaScript
+# Compile TypeScript code
 RUN npx tsc
 
-# Expose the port if needed
+# Expose the app port
 EXPOSE 3000
 
-# Run the compiled app
+# Run the app
 CMD ["node", "dist/app.js"]
