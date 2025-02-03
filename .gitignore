@@ -23,6 +23,7 @@ node_modules/
 *.exe
 *.lock.*
 LICENSE.txt
+terraform/terraform.tfvars
 
 
 # Ignore package locks and dependency files

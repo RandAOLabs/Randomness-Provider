@@ -105,7 +105,21 @@
    export AWS_REGION="your-region"  # e.g., us-east-1
    ```
 
-3. **Initialize and Apply Terraform Configuration:**
+
+4. **Set up ENV variables:**
+   Navigate to the Terraform directory of the project:
+   ```bash
+   cp terraform.tfvars.example terraform.tfvars
+   ```
+   Fill in all of the variables with your info.
+   The only feilds that NEED to be filled in are
+   1. provider_id 
+   2. local_wallet_json 
+
+   The Database configuration is highly suggested and the secrets can be left alone as its just the name of the secrets
+
+
+5. **Initialize and Apply Terraform Configuration:**
    Navigate to the Terraform directory of the project and run:
    ```bash
    terraform init

@@ -60,7 +60,7 @@ This option may cost more and depends on the uptime of the hardware you use. It 
 ## Graceful Shutdown Policy
 To avoid being slashed, it is critical to run the graceful shutdown in the event of downtime. Failing to do so may result in penalties.
 
-To run this go to "TODO" and navigate to your node and select the "SHUT DOWN" button and sign the transaction. 
+To run this go to ar://randao and navigate to your node and select the "SHUT DOWN" button and sign the transaction. 
 This will tell your provider to stop serving random. 
 
 After the maintinance is done and your provider is back up again click "START UP" button. 
@@ -77,7 +77,7 @@ After successfully setting up your node, you will need to provide proof that the
 
 2. Upon confirmation, Ethan will provide your provider address with the necessary funds.
 
-3. Navigate to [Insert link here] to stake your funds and configure your provider information.
+3. Navigate to ar://randao to stake your funds and configure your provider information.
 
 By completing this process, you will fully activate your node and ensure it is ready for network participation.
 Thank you for contributing to the network's success!
