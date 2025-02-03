@@ -144,7 +144,7 @@ Example wallet JSON format:
 }
 ```
 
-Note: The wallet JSON should be pasted directly into the terraform.tfvars file using the heredoc syntax (<<EOT) as shown in the example file. Do not try to use the file() function in terraform.tfvars as it's not supported there.
+Note: The wallet JSON should be pasted directly into the terraform.tfvars file
 
 3. Initialize Terraform:
 ```bash
