@@ -15,19 +15,25 @@ npx ts-node src/clear_outputs.ts
 
 
 
-docker build -t randao/orchestrator:latest -t randao/orchestrator:v0.2.50 .
+# Export version as an environment variable
+export VERSION=v0.2.51  # You can change this value to any version you want
 
+# Build the Docker image with the version tag
+docker build -t randao/orchestrator:latest -t randao/orchestrator:$VERSION .
+
+# Log in to Docker
 docker login
 
+# Push the image with the version tag
 docker push randao/orchestrator:latest
-docker push randao/orchestrator:v0.2.50
+docker push randao/orchestrator:$VERSION
 
-
+# Create and use buildx builder
 docker buildx create --use
 docker buildx inspect --bootstrap
 
-
+# Build the multi-platform image and push it
 docker buildx build --platform linux/amd64,linux/arm64 \
 -t randao/orchestrator:latest \
--t randao/orchestrator:v0.2.50 \
+-t randao/orchestrator:$VERSION \
 --push .
