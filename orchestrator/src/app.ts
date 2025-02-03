@@ -1,17 +1,19 @@
 import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
-import { getRandomClientAutoConfiguration, IRandomClient, RandomClient, RandomClientConfig } from "ao-process-clients"
+import { Environment, GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, getRandomClientAutoConfiguration, IRandomClient, RandomClient, RandomClientConfig } from "ao-process-clients"
 import { dbConfig } from './db_config.js';
+import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
+
 
 const RANDOM_CONFIG: RandomClientConfig = {
     tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
-    processId: "KbaY8P4h9wdHYKHlBSLbXN_yd-9gxUDxSgBackUxTiQ",
+    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
     wallet: JSON.parse(process.env.WALLET_JSON!),
     environment: 'mainnet'
 }
 //const randclient: IRandomClient = RandomClient.autoConfiguration()
-const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG)
+const randclient = new RandomClient(RANDOM_CONFIG)
 
 const docker = new Docker();
 
@@ -19,14 +21,15 @@ const docker = new Docker();
 
 // Constants for configuration
 const POLLING_INTERVAL_MS = 5000;
-const MINIMUM_ENTRIES = 250;
-const TARGET_ENTRIES = 500;
+const MINIMUM_ENTRIES = 500;
+const DRYRUNTIMEOUT = 15000; // 15 seconds
+const DRYRUNRESETTIME = 300000; // 5 min
 //Expected increments per second=10×0.005=0.05
 //180 times per hour
 //4,320 times per day
 //1,576,800 times per year
-const MAX_OUTSTANDING_REQUESTS = 50;
-const MAX_OUTSTANDING_FULFILLMENTS = 50;
+const MAX_OUTSTANDING_VDF_CONTAINERS = 10;
+const RANDOM_PER_VDF = 10;
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
 const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.4';
@@ -34,15 +37,37 @@ const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
-const ongoingFulfillments = new Set<string>(); // Track request IDs for ongoing fulfillments
 const PROVIDER_ID = process.env.PROVIDER_ID || "0";
 const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
+const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 let ongoingRequest = false;
 let spotInterruptions = 0;
-let totalProvided = 0;
 let PreviousTotalAvailableRandom = 0;
-const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+// Global variables to track polling status
+let pollingInProgress = false;
+let lastPollingId: string | null = null;
 
+// Cache for network configuration
+let cachedNetworkConfig: NetworkConfig | null = null;
+
+
+interface StepTracking {
+    step1?: { completed: boolean; timeTaken: number };
+    step2?: { completed: boolean; timeTaken: number };
+    step3?: { completed: boolean; timeTaken: number };
+    step4?: { completed: boolean; timeTaken: number };
+}
+let stepTracking: StepTracking = {}; // Tracks the status and time for each step
+
+// Function to reset step tracking data
+function resetStepTracking() {
+    stepTracking = {
+        step1: { completed: false, timeTaken: 0 },
+        step2: { completed: false, timeTaken: 0 },
+        step3: { completed: false, timeTaken: 0 },
+        step4: { completed: false, timeTaken: 0 },
+    };
+}
 
 // Retry logic for connecting to PostgreSQL
 async function connectWithRetry(): Promise<Client> {
@@ -75,8 +100,8 @@ async function setupDatabase(client: Client): Promise<void> {
         );
     `);
 
-        // Ensure detected_completed column exists in case the table was created before it was added
-        await client.query(`
+    // Ensure detected_completed column exists in case the table was created before it was added
+    await client.query(`
             ALTER TABLE verifiable_delay_functions 
             ADD COLUMN IF NOT EXISTS detected_completed TIMESTAMP NULL;
         `);
@@ -84,17 +109,11 @@ async function setupDatabase(client: Client): Promise<void> {
 }
 
 
-import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
-
-// Cache for network configuration
-let cachedNetworkConfig: NetworkConfig | null = null;
-
-// Modified function to trigger VDF job pod using ECS or Docker
 async function triggerVDFJobPod(): Promise<string | null> {
     if (ENVIRONMENT === 'cloud') {
         try {
             console.log("Cloud environment detected. Launching ECS task.");
-            
+
             // Get or refresh network configuration
             if (!cachedNetworkConfig) {
                 console.log("Fetching network configuration...");
@@ -102,7 +121,7 @@ async function triggerVDFJobPod(): Promise<string | null> {
                 console.log("Network config:", cachedNetworkConfig);
             }
 
-            const taskArn = await launchVDFTask(ecs, cachedNetworkConfig);
+            const taskArn = await launchVDFTask(ecs, cachedNetworkConfig, RANDOM_PER_VDF);
             if (taskArn) {
                 ongoingTasks.add(taskArn);
                 console.log(`ECS task started successfully: ${taskArn}`);
@@ -121,31 +140,43 @@ async function triggerVDFJobPod(): Promise<string | null> {
             return null;
         }
     } else {
-        const containerName = `vdf_job_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-        console.log(`Starting Docker container with name: ${containerName}`);
-        const container = await docker.createContainer({
-            Image: VDF_JOB_IMAGE,
-            Cmd: ['python', 'main.py'],
-            Env: [
-                `DATABASE_TYPE=postgresql`,
-                `DATABASE_HOST=${dbConfig.host}`,
-                `DATABASE_PORT=${dbConfig.port.toString()}`,
-                `DATABASE_USER=${dbConfig.user}`,
-                `DATABASE_PASSWORD=${dbConfig.password}`,
-                `DATABASE_NAME=${dbConfig.database}`,
-            ],
-            HostConfig: {
-                NetworkMode: DOCKER_NETWORK,
-            },
-            name: containerName
-        });
+        // Check if we have reached the maximum number of containers
+        if (ongoingContainers.size >= MAX_OUTSTANDING_VDF_CONTAINERS) {
+            console.log(`Maximum outstanding VDF containers (${MAX_OUTSTANDING_VDF_CONTAINERS}) reached. Not starting new container.`);
+            return null;
+        }
 
-        await container.start();
-        ongoingContainers.add(container.id);
-        console.log(`Docker container ${containerName} started successfully.`);
-        return container.id;
+        const containerName = `vdf_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+        console.log(`Starting Docker container with name: ${containerName}`);
+        try {
+            const container = await docker.createContainer({
+                Image: VDF_JOB_IMAGE,
+                Cmd: ['sh', '-c', `for i in $(seq 1 ${RANDOM_PER_VDF}); do python main.py; done`],
+                Env: [
+                    `DATABASE_TYPE=postgresql`,
+                    `DATABASE_HOST=${dbConfig.host}`,
+                    `DATABASE_PORT=${dbConfig.port.toString()}`,
+                    `DATABASE_USER=${dbConfig.user}`,
+                    `DATABASE_PASSWORD=${dbConfig.password}`,
+                    `DATABASE_NAME=${dbConfig.database}`,
+                ],
+                HostConfig: {
+                    NetworkMode: DOCKER_NETWORK,
+                },
+                name: containerName
+            });
+
+            await container.start();
+            ongoingContainers.add(container.id);
+            console.log(`Docker container ${containerName} started successfully.`);
+            return container.id;
+        } catch (error) {
+            console.error(`Error starting Docker container ${containerName}:`, error);
+            return null;
+        }
     }
 }
+
 
 // Modified function to wait for ECS tasks to complete and remove them from tracking
 async function monitorECSTasks(): Promise<void> {
@@ -181,34 +212,38 @@ async function monitorECSTasks(): Promise<void> {
 // Function to wait for Docker containers to complete and remove them from tracking
 async function monitorDockerContainers(): Promise<void> {
     if (ongoingContainers.size === 0) return;
+    if (ENVIRONMENT === 'cloud') {
+        await monitorECSTasks();
+    } else {
 
-    for (const containerId of ongoingContainers) {
-        try {
-            const container = docker.getContainer(containerId);
-            const containerInfo = await container.inspect();
+        for (const containerId of ongoingContainers) {
+            try {
+                const container = docker.getContainer(containerId);
+                const containerInfo = await container.inspect();
 
-            // Check if the container is already stopped (exited)
-            if (containerInfo.State.Status === 'exited') {
-                console.log(`Docker container stopped: ${containerId}`);
+                // Check if the container is already stopped (exited)
+                if (containerInfo.State.Status === 'exited') {
+                    console.log(`Docker container stopped: ${containerId}`);
 
-                // Attempt to remove the container, handling possible errors gracefully
-                try {
-                    await container.remove({ force: true }); // Force removal to avoid "in progress" errors
-                    console.log(`Docker container removed: ${containerId}`);
-                    ongoingContainers.delete(containerId);
-                } catch (removeError) {
-                    if (isDockerError(removeError) && removeError.statusCode === 409) {
-                        // Error 409 means removal is in progress, so skip this container for now
-                        console.log(`Removal of container ${containerId} is already in progress. Skipping.`);
-                    } else {
-                        // Handle other errors that might occur during container removal
-                        console.error(`Error removing Docker container ${containerId}:`, removeError);
+                    // Attempt to remove the container, handling possible errors gracefully
+                    try {
+                        await container.remove({ force: true }); // Force removal to avoid "in progress" errors
+                        console.log(`Docker container removed: ${containerId}`);
+                        ongoingContainers.delete(containerId);
+                    } catch (removeError) {
+                        if (isDockerError(removeError) && removeError.statusCode === 409) {
+                            // Error 409 means removal is in progress, so skip this container for now
+                            console.log(`Removal of container ${containerId} is already in progress. Skipping.`);
+                        } else {
+                            // Handle other errors that might occur during container removal
+                            console.error(`Error removing Docker container ${containerId}:`, removeError);
+                        }
                     }
                 }
+            } catch (error) {
+                console.error(`Error inspecting Docker container ${containerId}:`, error);
+                ongoingContainers.delete(containerId); // Remove from tracking if there's an error (e.g., container not found)
             }
-        } catch (error) {
-            console.error(`Error inspecting Docker container ${containerId}:`, error);
-            ongoingContainers.delete(containerId); // Remove from tracking if there's an error (e.g., container not found)
         }
     }
 }
@@ -222,16 +257,16 @@ function isDockerError(error: unknown): error is { statusCode: number } {
 function hexMod64Bit(expectedOutput: string): { expectedOutput64BitBase10: string } {
     // Parse the hexadecimal string into a BigInt
     const number = BigInt(`0x${expectedOutput}`);
-    
+
     // Define the 64-bit modulus (2^64 - 1)
     const modulus = BigInt("0x7FFFFFFFF");
-    
+
     // Keep dividing by modulus until we get a remainder less than modulus
     let remainder = number;
     while (remainder >= modulus) {
         remainder = remainder % modulus;
     }
-    
+
     // Return the remainder in base 10
     return {
         expectedOutput64BitBase10: remainder.toString(),
@@ -243,55 +278,99 @@ function addHexPrefix(value: string): string {
     return value.startsWith('0x') ? value : `0x${value}`;
 }
 
-// Function to check if there are fewer than MINIMUM_ENTRIES and fetch until TARGET_ENTRIES
-async function checkAndFetchIfNeeded(client: Client): Promise<void> {
-    try {
-        if (ongoingRequest) return;
-        const res = await client.query('SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL');
-        const currentCount = parseInt(res.rows[0].count, 10);
-        console.log("Total usable db entries: " + currentCount);
-        if(PreviousTotalAvailableRandom !=currentCount){
-            console.log(`Updating avalible random values from ${PreviousTotalAvailableRandom} to ${currentCount}`)
-            randclient.updateProviderAvailableValues(currentCount)
-            PreviousTotalAvailableRandom = currentCount;
-        } 
-
-        if (currentCount < MINIMUM_ENTRIES) {
-            const entriesNeeded = TARGET_ENTRIES - currentCount;
-            console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries to reach ${TARGET_ENTRIES}...`);
-            ongoingRequest = true;
-
-            const batchCount = Math.min(entriesNeeded, MAX_OUTSTANDING_REQUESTS);
-            console.log(`Batchcount: ${batchCount}, Ongoing containers: ${ongoingContainers.size}`);
-
-            let spawnCount = Math.min(batchCount, MAX_OUTSTANDING_REQUESTS - ongoingContainers.size);
-            if (spawnCount <= 0) {
-                console.log("Max outstanding containers reached. Skipping new container launches.");
-                return;
-            }
-            
-            for (let i = 0; i < spawnCount; i++) {
-                if (ENVIRONMENT === 'cloud' && ongoingTasks.size < MAX_OUTSTANDING_REQUESTS) {
-                    triggerVDFJobPod().then(taskArn => {
-                        if (taskArn) console.log(`ECS task triggered: ${taskArn}`);
-                    }).catch(console.error);
-                } else if (ENVIRONMENT !== 'cloud' && ongoingContainers.size < MAX_OUTSTANDING_REQUESTS) {
-                    triggerVDFJobPod().then(containerId => {
-                        if (containerId) console.log(`Docker container triggered: ${containerId}`);
-                    }).catch(console.error);
-                }
-            }
-
-            ongoingRequest = false; // Immediately allow other operations
+function updateAvailableValuesAsync(currentCount: number) {
+    return (async () => {
+        try {
+            await randclient.updateProviderAvailableValues(currentCount);
+            console.log(`Updated provider values to ${currentCount}`);
+        } catch (error) {
+            console.error("Failed to update provider values:", error);
         }
+    })();
+}
+
+async function getMoreRandom(currentCount: number) {
+    const entriesNeeded = MINIMUM_ENTRIES - currentCount;
+        console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries...`);
+
+        ongoingRequest = true;
+
+        // Calculate how many containers to spawn
+        const possibleBatchCount = Math.ceil(entriesNeeded / RANDOM_PER_VDF);
+        const availableSpawns = Math.min(
+            possibleBatchCount,
+            MAX_OUTSTANDING_VDF_CONTAINERS - ongoingContainers.size
+        );
+
+        if (availableSpawns <= 0) {
+            console.log("Max outstanding containers reached. Skipping new container launches.");
+            ongoingRequest = false;
+            return;
+        }
+
+        console.log(`Spawning up to ${availableSpawns} containers to generate random values.`);
+
+        for (let i = 0; i < availableSpawns; i++) {
+            try {
+                const jobId = await triggerVDFJobPod();
+                if (jobId) {
+                    console.log(`Job triggered: ${jobId}`);
+                    ongoingContainers.add(jobId);
+                }
+            } catch (error) {
+                console.error('Error triggering job pod:', error);
+            }
+        }
+}
+    
+
+// Function to check and fetch database entries as needed
+async function checkAndFetchIfNeeded(client: Client) {
+    try {
+        //Check if provider has been given a special signal
+        const on_chain_avalible_random = await getProviderAvailableRandomValues(PROVIDER_ID);
+
+        // Query current count of usable DB entries
+        const res = await client.query(
+            'SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL'
+        );
+        const currentCount = parseInt(res.rows[0].count, 10);
+        console.log("Total usable DB entries: " + currentCount);
+
+        switch (on_chain_avalible_random.availibleRandomValues) {
+            case -1:
+                console.log("Provider is shutting down");
+                //TODO prepare for shutdown
+                break;
+            case -2:
+                console.log("Value is -2");
+                break;
+            case -3:
+                console.log("Value is -3");
+                break;
+            default:
+                console.log("Value is not -1, -2, or -3");
+                if (PreviousTotalAvailableRandom !== currentCount) {
+                    console.log(`Updating available random values from ${PreviousTotalAvailableRandom} to ${currentCount}`);
+                    updateAvailableValuesAsync(currentCount);
+                    PreviousTotalAvailableRandom = currentCount;
+                }
+        }
+        if (ongoingRequest) return; // Prevent redundant operations
+
+        // Check if more entries are needed
+        if (currentCount >= MINIMUM_ENTRIES) return;
+        getMoreRandom(currentCount)
+        
     } catch (error) {
         console.error('Error during check and fetch:', error);
-        ongoingRequest = false;
+    } finally {
+        ongoingRequest = false; // Allow future operations
     }
 }
 
 // Function to post VDF challenge (fetches dbId dynamically)
-async function fulfillRandomChallenge(client: Client, requestId: string): Promise<void> {
+async function fulfillRandomChallenge(client: Client, requestId: string, parentLogId: string): Promise<void> {
     try {
         // Fetch the necessary details from the database using requestId
         const res = await client.query(
@@ -308,24 +387,24 @@ async function fulfillRandomChallenge(client: Client, requestId: string): Promis
 
         const { id: dbId, modulus, input } = res.rows[0];
 
-        console.log(`Fetched entry details - Request ID: ${requestId}, DB ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
+        console.log(`${parentLogId} Fetched entry details - Request ID: ${requestId}, DB ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
 
         // Add hex prefix to modulus and input
         const hexModulus = addHexPrefix(modulus);
         const hexInput = addHexPrefix(input);
 
-        console.log(`Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
+        console.log(`${parentLogId} Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
         await randclient.postVDFChallenge(requestId, hexModulus, hexInput);
-        console.log(`Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
+        console.log(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
     } catch (error) {
-        console.error(`Error posting VDF challenge for Request ID: ${requestId}:`, error);
+        console.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
     }
 }
 
 
 
 // Function to post VDF output and proof
-async function fulfillRandomOutput(client: Client, requestId: string): Promise<void> {
+async function fulfillRandomOutput(client: Client, requestId: string, parentLogId: string): Promise<void> {
     try {
         // Fetch the output and proof from the database using the requestId
         const res = await client.query('SELECT id, output, proof FROM verifiable_delay_functions WHERE request_id = $1', [requestId]);
@@ -335,11 +414,11 @@ async function fulfillRandomOutput(client: Client, requestId: string): Promise<v
         }
         const { id: dbId, output, proof } = res.rows[0];
 
-        console.log(`Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}`);
-        
+        console.log(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}`);
+
         // Process the output through hexMod64Bit
         const processedOutput = hexMod64Bit(output).expectedOutput64BitBase10;
-        console.log(`Processed output: ${processedOutput}  For request ID: ${requestId}`);
+        console.log(`${parentLogId} Processed output: ${processedOutput}  For request ID: ${requestId}`);
         // Process the proof array - add hex prefix to each element
         let processedProof = proof;
         if (Array.isArray(proof)) {
@@ -347,13 +426,11 @@ async function fulfillRandomOutput(client: Client, requestId: string): Promise<v
         }
         const proofString = JSON.stringify(processedProof);
 
-        console.log(`Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
+        console.log(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
         await randclient.postVDFOutputAndProof(requestId, processedOutput, proofString);
-        console.log(`Proof posted for request ID: ${requestId}`);
-
-        ongoingFulfillments.delete(dbId);
+        console.log(`${parentLogId} Proof posted for request ID: ${requestId}`);
     } catch (error) {
-        console.error(`Error fulfilling random output for request ID: ${requestId}:`, error);
+        console.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
     }
 }
 
@@ -363,51 +440,131 @@ function getLogId(): string {
     return `[LogID: ${randomId} | ${timestamp}]`;
 }
 
-let pollingInProgress = false; // Global flag to track polling state
+async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
 
-async function polling(client: Client): Promise<void> {
+    let openRequests: GetOpenRandomRequestsResponse;
+
+    // Create a function to fetch open requests with a timeout
+    const fetchOpenRequests = async (): Promise<GetOpenRandomRequestsResponse> => {
+        try {
+            const response = await randclient.getOpenRandomRequests(PROVIDER_ID);
+            return response;
+        } catch (error) {
+            console.error(`${parentLogId} Error fetching requests: ${error}`);
+            return { /* Return a default or empty response here */ } as GetOpenRandomRequestsResponse;
+        }
+    };
+
+    try {
+        openRequests = await Promise.race([
+            fetchOpenRequests().catch(err => {
+                throw new Error(`${parentLogId} Fetch Error: ${err}`);
+            }),
+            new Promise<GetOpenRandomRequestsResponse>((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout')), DRYRUNTIMEOUT)
+            )
+        ]);
+    } catch (error) {
+        console.log(`${parentLogId} Step 1: ${error}`);
+        randclient.setDryRunAsMessage(true);
+        console.log("Switching dryrun off");
+        openRequests = await fetchOpenRequests(); // Retry request
+    }
+
+    console.log(`${parentLogId} Step 1: Open Requests: ${JSON.stringify(openRequests)}`);
+    console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${openRequests.activeChallengeRequests.request_ids.length}`);
+    console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${openRequests.activeOutputRequests.request_ids.length}`);
+    return openRequests;
+}
+
+//Todo timeout the second anddefault to 0
+async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<GetProviderAvailableValuesResponse> {
+    let avalibleRandom: GetProviderAvailableValuesResponse;
+    // Create a function to fetch open requests with a timeout
+    const fetchAvalibleRandom = async (): Promise<GetProviderAvailableValuesResponse> => {
+        try {
+            const response = await randclient.getProviderAvailableValues(PROVIDER_ID);
+            return response;
+        } catch (error) {
+            console.error(`Error fetching avalible random: ${error}`);
+            return { /* Return a default or empty response here */ } as GetProviderAvailableValuesResponse;
+        }
+    };
+
+    try {
+        avalibleRandom = await Promise.race([
+            fetchAvalibleRandom().catch(err => {
+                throw new Error(`Fetch Error: ${err}`);
+            }),
+            new Promise<GetProviderAvailableValuesResponse>((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout')), DRYRUNTIMEOUT)
+            )
+        ]);
+    } catch (error) {
+        // console.log(`${parentLogId} Step 1: ${error}`);
+        randclient.setDryRunAsMessage(true);
+        console.log("Switching dryrun off");
+        avalibleRandom = await fetchAvalibleRandom(); // Retry request
+    }
+    return avalibleRandom;
+}
+
+
+
+async function polling(client: any) {
     if (pollingInProgress) {
-        console.log(`[SKIPPED] Polling is already in progress. Skipping this run.`);
+        const completedSteps = Object.entries(stepTracking)
+            .filter(([_, data]) => data?.completed)
+            .map(([step, data]) => `${step} (Time: ${data?.timeTaken}ms)`);
+
+        console.log(`\n[SKIPPED] Polling already in progress for ${lastPollingId}. Skipping this run.`);
+        console.log(`Completed steps so far: ${completedSteps.length > 0 ? completedSteps.join(", ") : "None"}`);
+        console.log("Current step tracking status:", stepTracking); // Debugging info to inspect tracking object
         return; // Prevent concurrent execution
     }
 
+    resetStepTracking(); // Reset step tracking for fresh polling
     pollingInProgress = true; // Mark polling as in progress
     const logId = getLogId();
+    lastPollingId = logId;
     console.log(`${logId} Starting Polling...`);
 
     try {
         const startTime = Date.now(); // Start time of polling
 
-        console.log(`${logId} Step 1: Fetching open requests from the Randomness Client.`);
-        const step1Start = Date.now();
-        const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
-        const step1End = Date.now();
-        console.log(`${logId} Step 1: Open Requests: ${JSON.stringify(openRequests)}`);
-        console.log(openRequests);
-        console.log(`${logId} Step 1: Open requests fetched. Time taken: ${(step1End - step1Start)}ms`);
+        // Step 1: Fetch open requests
+        const s1 = Date.now();
+        console.log(`${logId} Step 1 started.`);
+        const openRequests = await getProviderRequests(PROVIDER_ID, logId);
+        stepTracking.step1 = { completed: true, timeTaken: Date.now() - s1 };
+        console.log(`${logId} Step 1: Open requests fetched. Time taken: ${stepTracking.step1.timeTaken}ms`);
 
-        // Run Step 2, 3, and 4 concurrently after Step 1
-        const step2Start = Date.now();
+        // Run Step 2, 3, and 4 concurrently
         await Promise.all([
             (async () => {
                 const s2 = Date.now();
+                console.log(`${logId} Step 2 started.`);
                 await processChallengeRequests(client, openRequests.activeChallengeRequests, logId);
-                console.log(`${logId} Step 2 completed. Time taken: ${Date.now() - s2}ms`);
+                stepTracking.step2 = { completed: true, timeTaken: Date.now() - s2 };
+                console.log(`${logId} Step 2 completed. Time taken: ${stepTracking.step2.timeTaken}ms`);
             })(),
             (async () => {
                 const s3 = Date.now();
+                console.log(`${logId} Step 3 started.`);
                 await processOutputRequests(client, openRequests.activeOutputRequests, logId);
-                console.log(`${logId} Step 3 completed. Time taken: ${Date.now() - s3}ms`);
+                stepTracking.step3 = { completed: true, timeTaken: Date.now() - s3 };
+                console.log(`${logId} Step 3 completed. Time taken: ${stepTracking.step3.timeTaken}ms`);
             })(),
             (async () => {
                 const s4 = Date.now();
+                console.log(`${logId} Step 4 started.`);
                 await cleanupFulfilledEntries(client, openRequests, logId);
-                console.log(`${logId} Step 4 completed. Time taken: ${Date.now() - s4}ms`);
+                stepTracking.step4 = { completed: true, timeTaken: Date.now() - s4 };
+                console.log(`${logId} Step 4 completed. Time taken: ${stepTracking.step4.timeTaken}ms`);
             })(),
         ]);
-        const step2End = Date.now();
 
-        const totalTime = step2End - startTime;
+        const totalTime = Date.now() - startTime;
         console.log(`${logId} Polling cycle completed successfully. Total time taken: ${totalTime}ms`);
 
     } catch (error) {
@@ -425,39 +582,37 @@ async function processChallengeRequests(
     activeChallengeRequests: { request_ids: string[] } | undefined,
     parentLogId: string
 ): Promise<void> {
-    const logId = getLogId();
-    console.log(`${logId} Step 2: Processing challenge requests.`);
+    console.log(`${parentLogId} Step 2: Processing challenge requests.`);
 
     if (!activeChallengeRequests || activeChallengeRequests.request_ids.length === 0) {
-        console.log(`${logId} No Challenge Requests to process.`);
+        console.log(`${parentLogId} No Challenge Requests to process.`);
         return;
     }
 
-    // Limit to MAX_OUTSTANDING_FULFILLMENTS requests
-    const requestIds = activeChallengeRequests.request_ids.slice(0, MAX_OUTSTANDING_FULFILLMENTS);
-    console.log(`${logId} Processing up to ${requestIds.length} requests.`);
+    const requestIds = activeChallengeRequests.request_ids;
+    console.log(`${parentLogId} Processing up to ${requestIds.length} requests.`);
 
     try {
         await client.query('BEGIN'); // Start transaction
 
-        console.log(`${logId} Fetching existing request mappings.`);
+        console.log(`${parentLogId} Fetching existing request mappings.`);
         // Fetch already assigned request_id -> dbId mappings
         const existingMappingsRes = await client.query(
             `SELECT request_id FROM verifiable_delay_functions 
              WHERE request_id = ANY($1) 
-             FOR UPDATE SKIP LOCKED`, 
+             FOR UPDATE SKIP LOCKED`,
             [requestIds]
         );
 
         const existingRequestIds = new Set(existingMappingsRes.rows.map(row => row.request_id));
-        console.log(`${logId} Found ${existingRequestIds.size} already mapped requests.`);
+        console.log(`${parentLogId} Found ${existingRequestIds.size} already mapped requests.`);
 
         // Find only the unmapped requests (requestIds not in existingRequestIds)
         const unmappedRequestIds = requestIds.filter(requestId => !existingRequestIds.has(requestId));
-        console.log(`${logId} Unmapped requests: ${unmappedRequestIds.length}`);
+        console.log(`${parentLogId} Unmapped requests: ${unmappedRequestIds.length}`);
 
         // Fetch available DB entries for unmapped requests
-        console.log(`${logId} Fetching available DB entries.`);
+        console.log(`${parentLogId} Fetching available DB entries.`);
         const dbRes = await client.query(
             `SELECT id FROM verifiable_delay_functions 
              WHERE request_id IS NULL 
@@ -468,16 +623,16 @@ async function processChallengeRequests(
         );
 
         const availableDbEntries = dbRes.rows.map(row => row.id);
-        console.log(`${logId} Found ${availableDbEntries.length} available DB entries.`);
+        console.log(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
 
         // Reduce request list if we don’t have enough DB entries
         if (availableDbEntries.length < unmappedRequestIds.length) {
-            console.log(`${logId} Limiting requests to ${availableDbEntries.length} due to DB availability.`);
+            console.log(`${parentLogId} Limiting requests to ${availableDbEntries.length} due to DB availability.`);
             unmappedRequestIds.length = availableDbEntries.length;
         }
 
         if (availableDbEntries.length === 0 && existingRequestIds.size === 0) {
-            console.log(`${logId} No available DB entries to process and no existing mappings.`);
+            console.log(`${parentLogId} No available DB entries to process and no existing mappings.`);
             await client.query('COMMIT'); // Commit to release locks
             return;
         }
@@ -490,27 +645,27 @@ async function processChallengeRequests(
                  WHERE id = $2`,
                 [unmappedRequestIds[i], availableDbEntries[i]]
             );
-            console.log(`${logId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
+            console.log(`${parentLogId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
         }
 
         await client.query('COMMIT'); // Commit all updates at once
 
         // Call fulfillRandomChallenge for all request IDs (existing + newly mapped)
-        for (const requestId of requestIds) {
-            fulfillRandomChallenge(client, requestId)
-                .catch(error => console.error(`${logId} Error fulfilling challenge for Request ID ${requestId}:`, error));
-        }
+        // Create an array of promises and use Promise.all to await them all in parallel
+        const promises = requestIds.map(requestId =>
+            fulfillRandomChallenge(client, requestId, parentLogId)
+                .catch(error => console.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
+        );
 
-        console.log(`${logId} Step 2 completed.`);
+        await Promise.all(promises); // Wait for all promises to resolve
+        console.log(`${parentLogId} All challenges fulfilled`);
+
+        console.log(`${parentLogId} Step 2 completed.`);
     } catch (error) {
-        console.error(`${logId} Error in processChallengeRequests:`, error);
+        console.error(`${parentLogId} Error in processChallengeRequests:`, error);
         await client.query('ROLLBACK'); // Rollback on failure
     }
 }
-
-
-
-
 
 // Step 3: Process Output Requests (unchanged but with logging)
 async function processOutputRequests(
@@ -518,24 +673,23 @@ async function processOutputRequests(
     activeOutputRequests: { request_ids: string[] } | undefined,
     parentLogId: string
 ): Promise<void> {
-    const logId = getLogId();
-    console.log(`${logId} Step 3: Processing output requests.`);
+    console.log(`${parentLogId} Step 3: Processing output requests.`);
 
     if (!activeOutputRequests || activeOutputRequests.request_ids.length === 0) {
-        console.log(`${logId} No Output Requests to process.`);
+        console.log(`${parentLogId} No Output Requests to process.`);
         return;
     }
 
     const outputPromises = activeOutputRequests.request_ids.map(async (requestId) => {
-        console.log(`${logId} Processing output request ID: ${requestId}`);
+        console.log(`${parentLogId} Processing output request ID: ${requestId}`);
 
         // Run fulfillRandomOutput asynchronously (do not await)
-        fulfillRandomOutput(client, requestId)
-            .catch(error => console.error(`${logId} Error fulfilling output:`, error));
+        fulfillRandomOutput(client, requestId, parentLogId)
+            .catch(error => console.error(`${parentLogId} Error fulfilling output:`, error));
     });
 
     await Promise.all(outputPromises);
-    console.log(`${logId} Step 3 completed.`);
+    console.log(`${parentLogId} Step 3 completed.`);
 }
 
 // Step 4: Remove fulfilled entries no longer in use (unchanged but with logging)
@@ -544,8 +698,7 @@ async function cleanupFulfilledEntries(
     openRequests: any,
     parentLogId: string
 ): Promise<void> {
-    const logId = getLogId();
-    console.log(`${logId} Step 4: Checking for fulfilled entries no longer in use.`);
+    console.log(`${parentLogId} Step 4: Checking for fulfilled entries no longer in use.`);
 
     const now = new Date();
     const cutoffTime = new Date(now.getTime() - COMPLETION_RETENTION_PERIOD_MS);
@@ -588,7 +741,7 @@ async function cleanupFulfilledEntries(
                 SET detected_completed = NOW()
                 WHERE id = ANY($1)
             `, [markAsCompleted]);
-            console.log(`${logId} Marked ${markAsCompleted.length} entries as completed.`);
+            console.log(`${parentLogId} Marked ${markAsCompleted.length} entries as completed.`);
         }
 
         // Delete old completed entries
@@ -597,16 +750,16 @@ async function cleanupFulfilledEntries(
                 DELETE FROM verifiable_delay_functions
                 WHERE id = ANY($1)
             `, [markForDeletion]);
-            console.log(`${logId} Deleted ${markForDeletion.length} old completed entries.`);
+            console.log(`${parentLogId} Deleted ${markForDeletion.length} old completed entries.`);
         }
 
         await client.query('COMMIT');
     } catch (error) {
-        console.error(`${logId} Error in cleanupFulfilledEntries:`, error);
+        console.error(`${parentLogId} Error in cleanupFulfilledEntries:`, error);
         await client.query('ROLLBACK');
     }
 
-    console.log(`${logId} Step 4 completed.`);
+    console.log(`${parentLogId} Step 4 completed.`);
 }
 
 
@@ -620,21 +773,26 @@ async function run(): Promise<void> {
         const res = await client.query('SELECT COUNT(*) as count FROM verifiable_delay_functions');
         console.log(`Periodic log - Current database size: ${res.rows[0].count}`);
         // Check and fetch entries for the database if needed
-        console.log("Step 1: Checking and fetching database entries if below threshold.");
+        console.log("Step 0: Checking and fetching database entries if below threshold.");
         checkAndFetchIfNeeded(client).catch((error) => {
             console.error("Error in checkAndFetchIfNeeded:", error);
         });
-        
+
     }, 10000);
 
     setInterval(async () => {
         await monitorDockerContainers();
-        await monitorECSTasks();
     }, 30000); // Cleanup every 30 seconds
 
     setInterval(async () => {
         await polling(client);
     }, POLLING_INTERVAL_MS);
+
+    setInterval(async () => {
+        randclient.setDryRunAsMessage(false);
+        console.log("Switching dryrun on")
+    }, DRYRUNRESETTIME);
+
 
     process.on("SIGTERM", async () => {
         console.log("SIGTERM received. Closing database connection.");

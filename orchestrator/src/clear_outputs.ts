@@ -4,11 +4,11 @@ import { dbConfig } from './db_config';
 
 // Random Client Configuration
 const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "7enZBOhWsyU3A5oCt8HtMNNPHSxXYJVTlOGOetR9IDw",
-    processId: "KbaY8P4h9wdHYKHlBSLbXN_yd-9gxUDxSgBackUxTiQ",
+    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
+    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
     wallet: JSON.parse(process.env.WALLET_JSON!),
-    environment: 'mainnet' as const
-};
+    environment: 'mainnet'
+}
 
 const randclient = new RandomClient(RANDOM_CONFIG);
 const PROVIDER_ID = process.env.PROVIDER_ID || "0";

@@ -17,7 +17,7 @@ const CHANCE_TO_CALL_RANDOM = 1;
 
 const RANDOM_CONFIG: RandomClientConfig = {
     tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
-    processId: "KbaY8P4h9wdHYKHlBSLbXN_yd-9gxUDxSgBackUxTiQ",
+    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
     wallet: JSON.parse(process.env.REQUEST_WALLET_JSON!),
     environment: "mainnet",
 };

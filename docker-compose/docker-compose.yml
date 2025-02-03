@@ -1,4 +1,4 @@
-version: '3.8'
+# version: '3.8'
 
 services:
   # Instance 1
@@ -21,7 +21,7 @@ services:
       retries: 5
 
   orchestrator1:
-    image: randao/orchestrator:v0.2.18
+    image: randao/orchestrator:v0.2.46
     depends_on:
       postgres1:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
       retries: 5
 
   orchestrator2:
-    image: randao/orchestrator:v0.2.18
+    image: randao/orchestrator:v0.2.46
     depends_on:
       postgres2:
         condition: service_healthy
@@ -99,7 +99,7 @@ services:
       retries: 5
 
   orchestrator3:
-    image: randao/orchestrator:v0.2.18
+    image: randao/orchestrator:v0.2.46
     depends_on:
       postgres3:
         condition: service_healthy
@@ -133,7 +133,7 @@ services:
       - dbeaver-data:/opt/cloudbeaver/workspace
 
   requester:
-    image: randao/requester:v0.2.0
+    image: randao/requester:v0.2.1
     environment:
       REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
 

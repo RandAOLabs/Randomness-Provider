@@ -34,26 +34,39 @@ export async function getNetworkConfig(ecs: AWS.ECS): Promise<NetworkConfig> {
   };
 }
 
-export async function launchVDFTask(ecs: AWS.ECS, networkConfig: NetworkConfig): Promise<string | null> {
+export async function launchVDFTask(
+  ecs: AWS.ECS,
+  networkConfig: NetworkConfig,
+  random_per_vdf: number,
+): Promise<string | null> {
   const result = await ecs.runTask({
     cluster: process.env.ECS_CLUSTER_NAME,
     taskDefinition: 'vdf-job',
     capacityProviderStrategy: [
       {
         capacityProvider: 'FARGATE_SPOT',
-        weight: 1
-      }
+        weight: 1,
+      },
     ],
     networkConfiguration: {
       awsvpcConfiguration: {
         subnets: networkConfig.subnets,
         securityGroups: networkConfig.securityGroups,
-        assignPublicIp: 'ENABLED'
-      }
+        assignPublicIp: 'ENABLED',
+      },
     },
-    count: 1
+    count: 1,
+    overrides: {
+      containerOverrides: [
+        {
+          name: 'vdf_job_container', // Must match the container name in the task definition
+          command: ['sh', '-c', `for i in $(seq 1 ${random_per_vdf}); do python main.py; done`],
+        },
+      ],
+    },
   }).promise();
 
   const taskArn = result.tasks?.[0]?.taskArn;
   return taskArn || null;
 }
+
