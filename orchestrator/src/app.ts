@@ -46,6 +46,7 @@ let PreviousTotalAvailableRandom = 0;
 // Global variables to track polling status
 let pollingInProgress = false;
 let lastPollingId: string | null = null;
+let pulledDockerimage = false;
 
 // Cache for network configuration
 let cachedNetworkConfig: NetworkConfig | null = null;
@@ -149,6 +150,20 @@ async function triggerVDFJobPod(): Promise<string | null> {
         const containerName = `vdf_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         console.log(`Starting Docker container with name: ${containerName}`);
         try {
+            if (!pulledDockerimage) {
+                console.log(`Pulling image: ${VDF_JOB_IMAGE}`);
+                await new Promise((resolve, reject) => {
+                    docker.pull(VDF_JOB_IMAGE, (err: any, stream: NodeJS.ReadableStream) => {
+                        if (err) {
+                            return reject(err);
+                        }
+                        docker.modem.followProgress(stream, (doneErr) => {
+                            if (doneErr) reject(doneErr);
+                            else resolve(true);
+                        });
+                    });
+                });
+            }
             const container = await docker.createContainer({
                 Image: VDF_JOB_IMAGE,
                 Cmd: ['sh', '-c', `for i in $(seq 1 ${RANDOM_PER_VDF}); do python main.py; done`],
@@ -291,38 +306,38 @@ function updateAvailableValuesAsync(currentCount: number) {
 
 async function getMoreRandom(currentCount: number) {
     const entriesNeeded = MINIMUM_ENTRIES - currentCount;
-        console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries...`);
+    console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries...`);
 
-        ongoingRequest = true;
+    ongoingRequest = true;
 
-        // Calculate how many containers to spawn
-        const possibleBatchCount = Math.ceil(entriesNeeded / RANDOM_PER_VDF);
-        const availableSpawns = Math.min(
-            possibleBatchCount,
-            MAX_OUTSTANDING_VDF_CONTAINERS - ongoingContainers.size
-        );
+    // Calculate how many containers to spawn
+    const possibleBatchCount = Math.ceil(entriesNeeded / RANDOM_PER_VDF);
+    const availableSpawns = Math.min(
+        possibleBatchCount,
+        MAX_OUTSTANDING_VDF_CONTAINERS - ongoingContainers.size
+    );
 
-        if (availableSpawns <= 0) {
-            console.log("Max outstanding containers reached. Skipping new container launches.");
-            ongoingRequest = false;
-            return;
-        }
+    if (availableSpawns <= 0) {
+        console.log("Max outstanding containers reached. Skipping new container launches.");
+        ongoingRequest = false;
+        return;
+    }
 
-        console.log(`Spawning up to ${availableSpawns} containers to generate random values.`);
+    console.log(`Spawning up to ${availableSpawns} containers to generate random values.`);
 
-        for (let i = 0; i < availableSpawns; i++) {
-            try {
-                const jobId = await triggerVDFJobPod();
-                if (jobId) {
-                    console.log(`Job triggered: ${jobId}`);
-                    ongoingContainers.add(jobId);
-                }
-            } catch (error) {
-                console.error('Error triggering job pod:', error);
+    for (let i = 0; i < availableSpawns; i++) {
+        try {
+            const jobId = await triggerVDFJobPod();
+            if (jobId) {
+                console.log(`Job triggered: ${jobId}`);
+                ongoingContainers.add(jobId);
             }
+        } catch (error) {
+            console.error('Error triggering job pod:', error);
         }
+    }
 }
-    
+
 
 // Function to check and fetch database entries as needed
 async function checkAndFetchIfNeeded(client: Client) {
@@ -361,7 +376,7 @@ async function checkAndFetchIfNeeded(client: Client) {
         // Check if more entries are needed
         if (currentCount >= MINIMUM_ENTRIES) return;
         getMoreRandom(currentCount)
-        
+
     } catch (error) {
         console.error('Error during check and fetch:', error);
     } finally {
