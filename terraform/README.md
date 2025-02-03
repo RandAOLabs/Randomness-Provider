@@ -112,9 +112,18 @@
    cp terraform.tfvars.example terraform.tfvars
    ```
    Fill in all of the variables with your info.
-   The only feilds that NEED to be filled in are
-   1. provider_id 
-   2. local_wallet_json 
+## Variables Reference
+
+Required variables:
+- `provider_id`: Your unique provider identifier
+- `local_db_user`: Database username
+- `local_db_password`: Database password
+- `local_wallet_json`: Wallet JSON (either direct or via file)
+
+Optional variables (with defaults):
+- `aws_region`: AWS region (default: us-east-1)
+- `db_name`: Database name (default: orchestrator_db)
+- `secrets_prefix`: Prefix for secrets (default: /orchestrator)
 
    The Database configuration is highly suggested and the secrets can be left alone as its just the name of the secrets
 
@@ -127,7 +136,9 @@
    ```
    Type `yes` when prompted to confirm.
 
-This setup ensures your node is deployed with the highest uptime and optimal performance.
+This setup ensures your node is deployed with the highest uptime and optimal performance. 
+
+Please open up the AWS console and show the logs of this to Ethan top receive the Tokens to stake
 
 
 # Terraform Configuration for Randomness Provider
@@ -138,42 +149,6 @@ This Terraform configuration sets up:
 - VDF Fargate spot job configuration
 - AWS Secrets Manager for sensitive data
 
-## Setup Instructions
-
-1. Copy the example variables file:
-```bash
-cp terraform.tfvars.example terraform.tfvars
-```
-
-2. Edit `terraform.tfvars` with your configuration:
-   - Set your database credentials
-   - Set your provider ID
-   - Copy your wallet JSON and paste it into the `local_wallet_json` variable
-
-Example wallet JSON format:
-```json
-{
-  "address": "your-wallet-address",
-  "privateKey": "your-private-key"
-}
-```
-
-Note: The wallet JSON should be pasted directly into the terraform.tfvars file
-
-3. Initialize Terraform:
-```bash
-terraform init
-```
-
-4. Review the planned changes:
-```bash
-terraform plan
-```
-
-5. Apply the configuration:
-```bash
-terraform apply
-```
 
 ## Security Notes
 
@@ -190,18 +165,6 @@ terraform apply
 - **IAM**: Roles and policies for ECS tasks and secrets access
 - **CloudWatch**: Log groups for monitoring
 
-## Variables Reference
-
-Required variables:
-- `provider_id`: Your unique provider identifier
-- `local_db_user`: Database username
-- `local_db_password`: Database password
-- `local_wallet_json`: Wallet JSON (either direct or via file)
-
-Optional variables (with defaults):
-- `aws_region`: AWS region (default: us-east-1)
-- `db_name`: Database name (default: orchestrator_db)
-- `secrets_prefix`: Prefix for secrets (default: /orchestrator)
 
 
 [Main docs](../README.md)
