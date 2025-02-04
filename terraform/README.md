@@ -20,7 +20,8 @@
                 "ecs:DeregisterTaskDefinition",
                 "ecs:ListTaskDefinitions",
                 "ecs:DescribeTaskDefinition",
-                "ecs:PutClusterCapacityProviders"
+                "ecs:PutClusterCapacityProviders",
+                "ecs:DescribeClusters"
             ],
             "Resource": "*"
         },
@@ -59,7 +60,8 @@
                 "rds:DescribeDBInstances",
                 "rds:CreateDBSubnetGroup",
                 "rds:DeleteDBSubnetGroup",
-                "rds:ModifyDBSubnetGroup"
+                "rds:ModifyDBSubnetGroup",
+                "rds:AddTagsToResource"
             ],
             "Resource": "*"
         },
@@ -70,7 +72,7 @@
                 "logs:DeleteLogGroup",
                 "logs:PutRetentionPolicy"
             ],
-            "Resource": "arn:aws:logs:*:*:log-group:/ecs/*"
+            "Resource": "arn:aws:logs:*:*:log-group:*"
         },
         {
             "Effect": "Allow",
@@ -83,12 +85,14 @@
                 "ec2:DeleteVpcEndpoints",
                 "ec2:DescribeVpcEndpoints",
                 "ec2:DescribeSecurityGroups",
-                "ec2:DescribeNetworkInterfaces"
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:CreateTags"
             ],
             "Resource": "*"
         }
     ]
-}```
+}
+```
    Save the JSON and name it
    Click on Users and create a new user called TeraformDeployer
    Attach this new policy directly
