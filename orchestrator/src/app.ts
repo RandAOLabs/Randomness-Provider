@@ -306,6 +306,7 @@ function updateAvailableValuesAsync(currentCount: number) {
 
 async function getMoreRandom(currentCount: number) {
     const entriesNeeded = MINIMUM_ENTRIES - currentCount;
+    //TODO this math looked wrong in https://discord.com/channels/1209645894039896074/1333434937537204336/1336000074765045853
     console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries...`);
 
     ongoingRequest = true;
@@ -344,7 +345,7 @@ async function checkAndFetchIfNeeded(client: Client) {
     try {
         //Check if provider has been given a special signal
         const on_chain_avalible_random = await getProviderAvailableRandomValues(PROVIDER_ID);
-
+        //TODO fix so if they are not staked to start it will detect and fix the onchain data and not leave it alone
         // Query current count of usable DB entries
         const res = await client.query(
             'SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL'
