@@ -13,8 +13,15 @@ db_name           = "orchestrator_db"
 # Copy the contents of your wallet.json file and paste it here
 local_wallet_json = <<EOT
 {
-  "address": "your-wallet-address",
-  "privateKey": "your-private-key"
+  "kty": "RSA",
+  "e": "test",
+  "n": "test",
+  "d": "test",
+  "p": "test",
+  "q": "test",
+  "dp": "test",
+  "dq": "test",
+  "qi": "test"
 }
 EOT
 
