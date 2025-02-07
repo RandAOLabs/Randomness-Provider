@@ -3,17 +3,16 @@ import {
     IRandomClient,
     RandomClient,
     RandomClientConfig,
+    StakingClient,
 } from "ao-process-clients";
 
-const PROVIDER_IDS = [
-    "XUo8jZtUDBFLtp5okR12oLrqIZ4ewNlTpqnqmriihJE",
-    "c8Iq4yunDnsJWGSz_wYwQU--O9qeODKHiRdUkQkW2p8",
-    "Sr3HVH0Nh6iZzbORLpoQFOEvmsuKjXsHswSWH760KAk",
-    "1zlA7nKecUGevGNAEbjim_SlbioOI6daNNn2luDEHb0"
-];
-
-const RETRY_DELAY_MS = 5000; //5 seconds
+const RETRY_DELAY_MS = 1000; // 1 second
+const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
+
+let cachedProviders: string[] = [];
+let lastProviderRefresh = 0;
 
 const RANDOM_CONFIG: RandomClientConfig = {
     tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
@@ -27,23 +26,78 @@ let totalTimeToFulfill = 0;
 let fulfilledRequests = 0;
 const outstandingRequests: Set<string> = new Set();
 
-function getRandomProviders(): { providers: string[], count: number } {
-    // Randomly select how many providers we want (1-3)
-    const count = Math.floor(Math.random() * 3) + 1;
+async function getRandomProviders(stakeclient: StakingClient): Promise<{ providers: string[], count: number }> {
+    const now = Date.now();
     
-    // Shuffle the provider array and take the first 'count' elements
-    const shuffled = [...PROVIDER_IDS]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, Math.min(count, PROVIDER_IDS.length));
-    
-    return {
-        providers: shuffled,
-        count: shuffled.length
-    };
+    // If we have cached providers and they're not expired, use them
+    if (cachedProviders.length > 0 && (now - lastProviderRefresh) < PROVIDER_REFRESH_INTERVAL) {
+        const count = Math.floor(Math.random() * 3) + 1;
+        const shuffled = [...cachedProviders]
+            .sort(() => Math.random() - 0.5)
+            .slice(0, Math.min(count, cachedProviders.length));
+        return {
+            providers: shuffled,
+            count: shuffled.length
+        };
+    }
+
+    try {
+        // Create a promise that rejects after timeout
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("Provider request timed out")), PROVIDER_REQUEST_TIMEOUT);
+        });
+
+        // Create the actual provider fetch promise
+        const fetchPromise = async () => {
+            const providerInfo = await stakeclient.getAllProvidersInfo();
+            const eligibleProviders = providerInfo
+                .filter(provider => provider.active === 1)
+                .map(provider => provider.provider_id);
+
+            if (eligibleProviders.length === 0) {
+                throw new Error("No eligible providers found with active status");
+            }
+
+            // Update cache
+            cachedProviders = eligibleProviders;
+            lastProviderRefresh = now;
+
+            const count = Math.floor(Math.random() * 3) + 1;
+            const shuffled = [...eligibleProviders]
+                .sort(() => Math.random() - 0.5)
+                .slice(0, Math.min(count, eligibleProviders.length));
+            
+            return {
+                providers: shuffled,
+                count: shuffled.length
+            };
+        };
+
+        // Race between timeout and fetch
+        return await Promise.race([fetchPromise(), timeoutPromise]);
+    } catch (error) {
+        console.error("Error fetching providers:", error);
+        
+        // If we have cached providers, use them as fallback
+        if (cachedProviders.length > 0) {
+            console.log("Using cached providers as fallback");
+            const count = Math.floor(Math.random() * 3) + 1;
+            const shuffled = [...cachedProviders]
+                .sort(() => Math.random() - 0.5)
+                .slice(0, Math.min(count, cachedProviders.length));
+            return {
+                providers: shuffled,
+                count: shuffled.length
+            };
+        }
+        
+        throw error; // Re-throw if we have no fallback
+    }
 }
 
 async function main() {
-    const randclient: IRandomClient = new RandomClient(RANDOM_CONFIG);
+    const randclient = new RandomClient(RANDOM_CONFIG);
+    const stakeclient = new StakingClient(RANDOM_CONFIG);
 
     while (true) {
         console.log("Running")
@@ -52,7 +106,7 @@ async function main() {
             if (Math.random() < CHANCE_TO_CALL_RANDOM) {
                 console.log("Initiating random request...");
                 const callbackId = `callback-${Date.now()}`;
-                const { providers, count } = getRandomProviders();
+                const { providers, count } = await getRandomProviders(stakeclient);
                 console.log(`Selected ${count} providers:`, providers);
                 await randclient.createRequest(providers, count, callbackId);
                 totalRandomCalled++;
