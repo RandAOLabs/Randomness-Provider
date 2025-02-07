@@ -35,14 +35,12 @@ const RETRY_DELAY_MS = 10000;
 const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.4';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
-const ongoingTasks = new Set<string>();  // Track task ARNs of running ECS tasks
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
 const PROVIDER_ID = process.env.PROVIDER_ID || "0";
 const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 let ongoingRequest = false;
 let spotInterruptions = 0;
-let PreviousTotalAvailableRandom = 0;
 // Global variables to track polling status
 let pollingInProgress = false;
 let lastPollingId: string | null = null;
@@ -124,7 +122,7 @@ async function triggerVDFJobPod(): Promise<string | null> {
 
             const taskArn = await launchVDFTask(ecs, cachedNetworkConfig, RANDOM_PER_VDF);
             if (taskArn) {
-                ongoingTasks.add(taskArn);
+                ongoingContainers.add(taskArn);
                 console.log(`ECS task started successfully: ${taskArn}`);
                 return taskArn;
             }
@@ -195,11 +193,11 @@ async function triggerVDFJobPod(): Promise<string | null> {
 
 // Modified function to wait for ECS tasks to complete and remove them from tracking
 async function monitorECSTasks(): Promise<void> {
-    if (ongoingTasks.size === 0) return;
+    if (ongoingContainers.size === 0) return;
 
     const describeTasksResult = await ecs.describeTasks({
         cluster: process.env.ECS_CLUSTER_NAME || 'fargate-cluster',
-        tasks: Array.from(ongoingTasks)
+        tasks: Array.from(ongoingContainers)
     }).promise();
 
     describeTasksResult.tasks?.forEach(task => {
@@ -219,7 +217,7 @@ async function monitorECSTasks(): Promise<void> {
             } else {
                 console.log('Task stopped due to normal completion.');
             }
-            ongoingTasks.delete(task.taskArn as string);
+            ongoingContainers.delete(task.taskArn as string);
         }
     });
 }
@@ -345,7 +343,6 @@ async function checkAndFetchIfNeeded(client: Client) {
     try {
         //Check if provider has been given a special signal
         const on_chain_avalible_random = await getProviderAvailableRandomValues(PROVIDER_ID);
-        //TODO fix so if they are not staked to start it will detect and fix the onchain data and not leave it alone
         // Query current count of usable DB entries
         const res = await client.query(
             'SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL'
@@ -366,10 +363,9 @@ async function checkAndFetchIfNeeded(client: Client) {
                 break;
             default:
                 console.log("Value is not -1, -2, or -3");
-                if (PreviousTotalAvailableRandom !== currentCount) {
-                    console.log(`Updating available random values from ${PreviousTotalAvailableRandom} to ${currentCount}`);
+                if (on_chain_avalible_random.availibleRandomValues !== currentCount) {
+                    console.log(`Updating available random values from ${on_chain_avalible_random.availibleRandomValues} to ${currentCount}`);
                     updateAvailableValuesAsync(currentCount);
-                    PreviousTotalAvailableRandom = currentCount;
                 }
         }
         if (ongoingRequest) return; // Prevent redundant operations
@@ -456,7 +452,7 @@ function getLogId(): string {
     return `[LogID: ${randomId} | ${timestamp}]`;
 }
 
-async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
+async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse | false> {
 
     let openRequests: GetOpenRandomRequestsResponse;
 
@@ -487,13 +483,15 @@ async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Pr
         openRequests = await fetchOpenRequests(); // Retry request
     }
 
+    if(openRequests.toString().includes("not found")){
+    return false
+    }
     console.log(`${parentLogId} Step 1: Open Requests: ${JSON.stringify(openRequests)}`);
     console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${openRequests.activeChallengeRequests.request_ids.length}`);
     console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${openRequests.activeOutputRequests.request_ids.length}`);
     return openRequests;
 }
 
-//Todo timeout the second anddefault to 0
 async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<GetProviderAvailableValuesResponse> {
     let avalibleRandom: GetProviderAvailableValuesResponse;
     // Create a function to fetch open requests with a timeout
@@ -552,6 +550,10 @@ async function polling(client: any) {
         const s1 = Date.now();
         console.log(`${logId} Step 1 started.`);
         const openRequests = await getProviderRequests(PROVIDER_ID, logId);
+        if(openRequests == false){
+            console.log("Provider is set up and ready. Please stake to join network at https://providers_randao.ar.io")
+            return
+        }
         stepTracking.step1 = { completed: true, timeTaken: Date.now() - s1 };
         console.log(`${logId} Step 1: Open requests fetched. Time taken: ${stepTracking.step1.timeTaken}ms`);
 
