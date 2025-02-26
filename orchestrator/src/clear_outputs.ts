@@ -1,16 +1,20 @@
 import { Client } from 'pg';
-import { getRandomClientAutoConfiguration, RandomClient, RandomClientConfig } from "ao-process-clients";
+import {  RandomClient, RandomClientConfig } from "ao-process-clients";
 import { dbConfig } from './db_config';
 
 // Random Client Configuration
-const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
-    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
-    wallet: JSON.parse(process.env.WALLET_JSON!),
-    environment: 'mainnet'
-}
-
-const randclient = new RandomClient(RANDOM_CONFIG);
+async function getRandomClient(): Promise<RandomClient>{
+    //     let test = await getRandomClientAutoConfiguration()
+    // test.wallet = JSON.parse(process.env.WALLET_JSON!)
+    
+    const RANDOM_CONFIG: RandomClientConfig = {
+        wallet: JSON.parse(process.env.WALLET_JSON!),
+        tokenProcessId: '5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI',
+        processId: '1dnDvaDRQ7Ao6o1ohTr7NNrN5mp1CpsXFrWm3JJFEs8'
+    }
+    const randclient = new RandomClient(RANDOM_CONFIG)
+        return randclient
+    }
 const PROVIDER_ID = process.env.PROVIDER_ID || "0";
 
 // Function to connect to PostgreSQL
@@ -25,7 +29,7 @@ async function connectToDatabase() {
 async function clearAllOutputRequests(client: Client) {
     try {
         console.log("Fetching open output requests...");
-        const openRequests = await randclient.getOpenRandomRequests(PROVIDER_ID);
+        const openRequests = await (await getRandomClient()).getOpenRandomRequests(PROVIDER_ID);
 
         if (openRequests && openRequests.activeOutputRequests) {
             console.log(`Found ${openRequests.activeOutputRequests.request_ids.length} output requests to clear.`);
@@ -34,7 +38,7 @@ async function clearAllOutputRequests(client: Client) {
             const clearPromises = openRequests.activeOutputRequests.request_ids.map(async (requestId: string) => {
                 console.log(`Sending "No data" for output request ID: ${requestId}`);
                 try {
-                    await randclient.postVDFOutputAndProof(requestId, "No data", "No data");
+                    await (await getRandomClient()).postVDFOutputAndProof(requestId, "No data", "No data");
                     console.log(`"No data" successfully sent for request ID: ${requestId}`);
                 } catch (error) {
                     console.error(`Error sending "No data" for request ID: ${requestId}:`, error);

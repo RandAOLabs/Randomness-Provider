@@ -1,15 +1,25 @@
-import { getRandomClientAutoConfiguration, RandomClient, RandomClientConfig, StakingClient,  } from "ao-process-clients";
-import { ProviderDetails } from "ao-process-clients/dist/src/clients/staking/abstract/types";
+import { ProviderDetails, ProviderStakingClient, StakingClientConfig  } from "ao-process-clients";
 
 // Random Client Configuration
-const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
-    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
+// async function getStakingClient(): Promise<ProviderStakingClient>{
+//     let test = await getProviderStakingClientAutoConfiguration()
+// test.wallet = JSON.parse(process.env.WALLET_JSON!)
+// const randclient = new ProviderStakingClient(test)
+//     return randclient
+// }
+
+async function getStakingClient(): Promise<ProviderStakingClient>{
+//     let test = await getProviderStakingClientAutoConfiguration()
+// test.wallet = JSON.parse(process.env.WALLET_JSON!)
+const RANDOM_CONFIG: StakingClientConfig = {
     wallet: JSON.parse(process.env.WALLET_JSON!),
-    environment: 'mainnet'
+    tokenProcessId: '5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI',
+    processId: 'EIQJoqVWonlxsEe8xGpQZhh54wrmgE3q0tAsVIhKYQU'
+}
+const randclient = new ProviderStakingClient(RANDOM_CONFIG)
+    return randclient
 }
 
-const randclient = new StakingClient(RANDOM_CONFIG);
 
 // Function to clear all output requests
 async function stake() {
@@ -26,7 +36,7 @@ async function stake() {
             discord: "test_discord",
             /** Optional Telegram handle */
             telegram: "test_tg"};
-        console.log(await randclient.stake("100000000000000000000",providerDetails))
+        console.log(await (await getStakingClient()).stakeWithDetails("100000000000000000000",providerDetails))
     } catch (error) {
         console.error("An error occurred while staking:", error);
     } finally {
