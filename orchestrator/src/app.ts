@@ -1,26 +1,44 @@
 import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
-import { Environment, GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, getRandomClientAutoConfiguration, IRandomClient, RandomClient, RandomClientConfig } from "ao-process-clients"
+import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig} from "ao-process-clients"
 import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
 
 
-const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
-    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
-    wallet: JSON.parse(process.env.WALLET_JSON!),
-    environment: 'mainnet'
-}
+// const RANDOM_CONFIG: RandomClientConfig = {
+//     wallet: JSON.parse(process.env.WALLET_JSON!),
+//     tokenProcessId: '',
+//     processId: ''
+// }
 //const randclient: IRandomClient = RandomClient.autoConfiguration()
+async function getRandomClient(): Promise<RandomClient>{
+//     let test = await getRandomClientAutoConfiguration()
+// test.wallet = JSON.parse(process.env.WALLET_JSON!)
+
+const RANDOM_CONFIG: RandomClientConfig = {
+    wallet: JSON.parse(process.env.WALLET_JSON!),
+    tokenProcessId: '5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI',
+    processId: '1dnDvaDRQ7Ao6o1ohTr7NNrN5mp1CpsXFrWm3JJFEs8'
+}
 const randclient = new RandomClient(RANDOM_CONFIG)
+    return randclient
+}
+
+// async function getStakingClient(): Promise<ProviderStakingClient>{
+//     let test = await getProviderStakingClientAutoConfiguration()
+// test.wallet = JSON.parse(process.env.WALLET_JSON!)
+// const randclient = new ProviderStakingClient(test)
+//     return randclient
+// }
+
 
 const docker = new Docker();
 
 
 
 // Constants for configuration
-const POLLING_INTERVAL_MS = 5000;
+const POLLING_INTERVAL_MS = 1000;
 const MINIMUM_ENTRIES = 500;
 const DRYRUNTIMEOUT = 15000; // 15 seconds
 const DRYRUNRESETTIME = 300000; // 5 min
@@ -161,6 +179,7 @@ async function triggerVDFJobPod(): Promise<string | null> {
                         });
                     });
                 });
+                pulledDockerimage = true;
             }
             const container = await docker.createContainer({
                 Image: VDF_JOB_IMAGE,
@@ -294,7 +313,7 @@ function addHexPrefix(value: string): string {
 function updateAvailableValuesAsync(currentCount: number) {
     return (async () => {
         try {
-            await randclient.updateProviderAvailableValues(currentCount);
+            (await getRandomClient()).updateProviderAvailableValues(currentCount);
             console.log(`Updated provider values to ${currentCount}`);
         } catch (error) {
             console.error("Failed to update provider values:", error);
@@ -354,6 +373,7 @@ async function checkAndFetchIfNeeded(client: Client) {
             case -1:
                 console.log("Provider is shutting down");
                 //TODO prepare for shutdown
+                //TODO the async causes it to ovewrite itself
                 break;
             case -2:
                 console.log("Value is -2");
@@ -363,7 +383,8 @@ async function checkAndFetchIfNeeded(client: Client) {
                 break;
             default:
                 console.log("Value is not -1, -2, or -3");
-                if (on_chain_avalible_random.availibleRandomValues !== currentCount) {
+                console.log("Value is "+ on_chain_avalible_random.availibleRandomValues)
+                if (on_chain_avalible_random.availibleRandomValues != currentCount) {
                     console.log(`Updating available random values from ${on_chain_avalible_random.availibleRandomValues} to ${currentCount}`);
                     updateAvailableValuesAsync(currentCount);
                 }
@@ -406,7 +427,7 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
         const hexInput = addHexPrefix(input);
 
         console.log(`${parentLogId} Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
-        await randclient.postVDFChallenge(requestId, hexModulus, hexInput);
+        await (await getRandomClient()).postVDFChallenge(requestId, hexModulus, hexInput);
         console.log(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
     } catch (error) {
         console.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
@@ -439,7 +460,7 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
         const proofString = JSON.stringify(processedProof);
 
         console.log(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
-        await randclient.postVDFOutputAndProof(requestId, processedOutput, proofString);
+        await (await getRandomClient()).postVDFOutputAndProof(requestId, processedOutput, proofString);
         console.log(`${parentLogId} Proof posted for request ID: ${requestId}`);
     } catch (error) {
         console.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
@@ -459,7 +480,7 @@ async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Pr
     // Create a function to fetch open requests with a timeout
     const fetchOpenRequests = async (): Promise<GetOpenRandomRequestsResponse> => {
         try {
-            const response = await randclient.getOpenRandomRequests(PROVIDER_ID);
+            const response = await (await getRandomClient()).getOpenRandomRequests(PROVIDER_ID);
             return response;
         } catch (error) {
             console.error(`${parentLogId} Error fetching requests: ${error}`);
@@ -478,7 +499,8 @@ async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Pr
         ]);
     } catch (error) {
         console.log(`${parentLogId} Step 1: ${error}`);
-        randclient.setDryRunAsMessage(true);
+        //randclient.setDryRunAsMessage(true);
+        console.log("Removed this as its spamming")
         console.log("Switching dryrun off");
         openRequests = await fetchOpenRequests(); // Retry request
     }
@@ -497,7 +519,7 @@ async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<Ge
     // Create a function to fetch open requests with a timeout
     const fetchAvalibleRandom = async (): Promise<GetProviderAvailableValuesResponse> => {
         try {
-            const response = await randclient.getProviderAvailableValues(PROVIDER_ID);
+            const response = await (await getRandomClient()).getProviderAvailableValues(PROVIDER_ID);
             return response;
         } catch (error) {
             console.error(`Error fetching avalible random: ${error}`);
@@ -516,7 +538,8 @@ async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<Ge
         ]);
     } catch (error) {
         // console.log(`${parentLogId} Step 1: ${error}`);
-        randclient.setDryRunAsMessage(true);
+        //randclient.setDryRunAsMessage(true);
+        console.log("Removed this as its spamming")
         console.log("Switching dryrun off");
         avalibleRandom = await fetchAvalibleRandom(); // Retry request
     }
@@ -806,10 +829,10 @@ async function run(): Promise<void> {
         await polling(client);
     }, POLLING_INTERVAL_MS);
 
-    setInterval(async () => {
-        randclient.setDryRunAsMessage(false);
-        console.log("Switching dryrun on")
-    }, DRYRUNRESETTIME);
+    // setInterval(async () => {
+    //     randclient.setDryRunAsMessage(false);
+    //     console.log("Switching dryrun on")
+    // }, DRYRUNRESETTIME);
 
 
     process.on("SIGTERM", async () => {
