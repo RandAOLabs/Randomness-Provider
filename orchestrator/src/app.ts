@@ -4,7 +4,7 @@ import AWS from 'aws-sdk';
 import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig} from "ao-process-clients"
 import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
-
+import Arweave from 'arweave';
 
 // const RANDOM_CONFIG: RandomClientConfig = {
 //     wallet: JSON.parse(process.env.WALLET_JSON!),
@@ -41,7 +41,7 @@ const docker = new Docker();
 const POLLING_INTERVAL_MS = 1000;
 const MINIMUM_ENTRIES = 500;
 const DRYRUNTIMEOUT = 15000; // 15 seconds
-const DRYRUNRESETTIME = 300000; // 5 min
+//const DRYRUNRESETTIME = 300000; // 5 min
 //Expected increments per second=10×0.005=0.05
 //180 times per hour
 //4,320 times per day
@@ -54,7 +54,7 @@ const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.4';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
-const PROVIDER_ID = process.env.PROVIDER_ID || "0";
+let PROVIDER_ID = "";
 const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 let ongoingRequest = false;
@@ -67,6 +67,8 @@ let pulledDockerimage = false;
 // Cache for network configuration
 let cachedNetworkConfig: NetworkConfig | null = null;
 
+
+const arweave = Arweave.init({});
 
 interface StepTracking {
     step1?: { completed: boolean; timeTaken: number };
@@ -315,6 +317,18 @@ function updateAvailableValuesAsync(currentCount: number) {
         try {
             (await getRandomClient()).updateProviderAvailableValues(currentCount);
             console.log(`Updated provider values to ${currentCount}`);
+        } catch (error) {
+            console.error("Failed to update provider values:", error);
+        }
+    })();
+}
+
+async function shutdown() {
+    return (async () => {
+        try {
+            let message = await (await getRandomClient()).updateProviderAvailableValues(0);
+            console.log(message)
+            console.log(`Updated provider values to ${0}`);
         } catch (error) {
             console.error("Failed to update provider values:", error);
         }
@@ -810,6 +824,12 @@ async function run(): Promise<void> {
     const client = await connectWithRetry();
     await setupDatabase(client);
 
+    arweave.wallets.jwkToAddress(JSON.parse(process.env.WALLET_JSON!)).then((address) => {
+        console.log(address);
+        PROVIDER_ID = address
+        //1seRanklLU_1VTGkEk7P0xAwMJfA7owA1JHW5KyZKlY
+    });
+
     setInterval(async () => {
         const res = await client.query('SELECT COUNT(*) as count FROM verifiable_delay_functions');
         console.log(`Periodic log - Current database size: ${res.rows[0].count}`);
@@ -838,6 +858,7 @@ async function run(): Promise<void> {
     process.on("SIGTERM", async () => {
         console.log("SIGTERM received. Closing database connection.");
         await client.end();
+        await shutdown();
         process.exit(0);
     });
 }
