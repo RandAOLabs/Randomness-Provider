@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "ao-process-clients": "3.7.3",
+    "ao-vrf": "file:",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.7.7",
     "crypto": "^1.0.1",

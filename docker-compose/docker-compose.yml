@@ -18,7 +18,7 @@ services:
       retries: 5
 
   orchestrator:
-    image: randao/orchestrator:v0.3.0
+    image: randao/orchestrator:v0.3.2
     depends_on:
       postgres:
         condition: service_healthy
