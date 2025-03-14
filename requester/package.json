@@ -7,7 +7,7 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "ao-process-clients": "3.7.3",
+    "ao-process-clients": "5.3.14",
     "ao-vrf": "file:",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.7.7",
