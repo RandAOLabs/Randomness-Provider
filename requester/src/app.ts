@@ -1,12 +1,15 @@
 import {
+    ProviderStakingClient,
     getRandomClientAutoConfiguration,
     IRandomClient,
     RandomClient,
     RandomClientConfig,
     StakingClient,
+    ProviderProfileClient,
+    RandomClientConfigBuilder,
 } from "ao-process-clients";
 
-const RETRY_DELAY_MS = 1000; // 1 second
+const RETRY_DELAY_MS = 10000; // 10 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -14,19 +17,20 @@ const CHANCE_TO_CALL_RANDOM = 1;
 let cachedProviders: string[] = [];
 let lastProviderRefresh = 0;
 
-const RANDOM_CONFIG: RandomClientConfig = {
-    tokenProcessId: "5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI",
-    processId: "yKVS1tYE3MajUpZqEIORmW1J8HTke-6o6o6tnlkFOZQ",
-    wallet: JSON.parse(process.env.REQUEST_WALLET_JSON!),
-    environment: "mainnet",
-};
-
+async function getRandomClient(): Promise<RandomClient>{
+    //     let test = await getRandomClientAutoConfiguration()
+    // test.wallet = JSON.parse(process.env.WALLET_JSON!)
+    
+    const RANDOM_CONFIG: RandomClientConfig = await new RandomClientConfigBuilder().withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!)).build()
+    const randclient = new RandomClient(RANDOM_CONFIG)
+        return randclient
+    }
 let totalRandomCalled = 0;
 let totalTimeToFulfill = 0;
 let fulfilledRequests = 0;
 const outstandingRequests: Set<string> = new Set();
 
-async function getRandomProviders(stakeclient: StakingClient): Promise<{ providers: string[], count: number }> {
+async function getRandomProviders(randclient: RandomClient): Promise<{ providers: string[], count: number }> {
     const now = Date.now();
     
     // If we have cached providers and they're not expired, use them
@@ -49,9 +53,11 @@ async function getRandomProviders(stakeclient: StakingClient): Promise<{ provide
 
         // Create the actual provider fetch promise
         const fetchPromise = async () => {
-            const providerInfo = await stakeclient.getAllProvidersInfo();
+            const providerInfo = await randclient.getAllProviderActivity();
             const eligibleProviders = providerInfo
+            //@ts-ignore
                 .filter(provider => provider.active === 1)
+                //@ts-ignore
                 .map(provider => provider.provider_id);
 
             if (eligibleProviders.length === 0) {
@@ -96,8 +102,8 @@ async function getRandomProviders(stakeclient: StakingClient): Promise<{ provide
 }
 
 async function main() {
-    const randclient = new RandomClient(RANDOM_CONFIG);
-    const stakeclient = new StakingClient(RANDOM_CONFIG);
+    const randclient = await getRandomClient()
+    //const stakeclient = ProviderStakingClient.autoConfiguration();
 
     while (true) {
         console.log("Running")
@@ -106,7 +112,7 @@ async function main() {
             if (Math.random() < CHANCE_TO_CALL_RANDOM) {
                 console.log("Initiating random request...");
                 const callbackId = `callback-${Date.now()}`;
-                const { providers, count } = await getRandomProviders(stakeclient);
+                const { providers, count } = await getRandomProviders(randclient);
                 console.log(`Selected ${count} providers:`, providers);
                 await randclient.createRequest(providers, count, callbackId);
                 totalRandomCalled++;

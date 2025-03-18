@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
-import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig} from "ao-process-clients"
+import { BaseClientConfig, BaseClientConfigBuilder, GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig, RandomClientConfigBuilder} from "ao-process-clients"
 import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
 import Arweave from 'arweave';
@@ -12,18 +12,35 @@ import Arweave from 'arweave';
 //     processId: ''
 // }
 //const randclient: IRandomClient = RandomClient.autoConfiguration()
-async function getRandomClient(): Promise<RandomClient>{
-//     let test = await getRandomClientAutoConfiguration()
-// test.wallet = JSON.parse(process.env.WALLET_JSON!)
+let randomClientInstance: RandomClient | null = null;
 
-const RANDOM_CONFIG: RandomClientConfig = {
-    wallet: JSON.parse(process.env.WALLET_JSON!),
-    tokenProcessId: '5ZR9uegKoEhE9fJMbs-MvWLIztMNCVxgpzfeBVE3vqI',
-    processId: '1dnDvaDRQ7Ao6o1ohTr7NNrN5mp1CpsXFrWm3JJFEs8'
+async function getRandomClient(): Promise<RandomClient> {
+    if (!randomClientInstance) {
+        const RANDOM_CONFIG: RandomClientConfig = await new RandomClientConfigBuilder()
+            .withWallet(JSON.parse(process.env.WALLET_JSON!))
+            .build();
+        
+        randomClientInstance = new RandomClient(RANDOM_CONFIG);
+    }
+    
+    return randomClientInstance;
 }
-const randclient = new RandomClient(RANDOM_CONFIG)
-    return randclient
-}
+
+// async function getRandomClient(): Promise<RandomClient> {
+//     if (!randomClientInstance) {
+//         const RANDOM_CONFIG: BaseClientConfigBuilder = await new BaseClientConfigBuilder()
+//             .withWallet(JSON.parse(process.env.WALLET_JSON!))
+//             .withAOConfig({
+//                 CU_URL: "https://cu.randao.net",
+//                 MODE: 'legacy'
+//             })
+//             .build();
+        
+//         randomClientInstance = new RandomClient(RANDOM_CONFIG);
+//     }
+    
+//     return randomClientInstance;
+// }
 
 // async function getStakingClient(): Promise<ProviderStakingClient>{
 //     let test = await getProviderStakingClientAutoConfiguration()
@@ -34,18 +51,10 @@ const randclient = new RandomClient(RANDOM_CONFIG)
 
 
 const docker = new Docker();
-
-
-
 // Constants for configuration
 const POLLING_INTERVAL_MS = 1000;
-const MINIMUM_ENTRIES = 500;
-const DRYRUNTIMEOUT = 15000; // 15 seconds
-//const DRYRUNRESETTIME = 300000; // 5 min
-//Expected increments per second=10×0.005=0.05
-//180 times per hour
-//4,320 times per day
-//1,576,800 times per year
+const MINIMUM_ENTRIES = 1000;
+const DRYRUNTIMEOUT = 30000; // 30 seconds
 const MAX_OUTSTANDING_VDF_CONTAINERS = 10;
 const RANDOM_PER_VDF = 10;
 const MAX_RETRIES = 10;
@@ -57,13 +66,16 @@ const ongoingContainers = new Set<string>(); // Track container IDs of running D
 let PROVIDER_ID = "";
 const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+const UNCHAIN_VS_OFFCHAIN_MAX_DIF = 250;
+
+
+
 let ongoingRequest = false;
 let spotInterruptions = 0;
 // Global variables to track polling status
 let pollingInProgress = false;
 let lastPollingId: string | null = null;
 let pulledDockerimage = false;
-
 // Cache for network configuration
 let cachedNetworkConfig: NetworkConfig | null = null;
 
@@ -315,7 +327,8 @@ function addHexPrefix(value: string): string {
 function updateAvailableValuesAsync(currentCount: number) {
     return (async () => {
         try {
-            (await getRandomClient()).updateProviderAvailableValues(currentCount);
+            const randomClient = await getRandomClient();
+            await randomClient.updateProviderAvailableValues(currentCount);
             console.log(`Updated provider values to ${currentCount}`);
         } catch (error) {
             console.error("Failed to update provider values:", error);
@@ -323,17 +336,18 @@ function updateAvailableValuesAsync(currentCount: number) {
     })();
 }
 
+
 async function shutdown() {
-    return (async () => {
-        try {
-            let message = await (await getRandomClient()).updateProviderAvailableValues(0);
-            console.log(message)
-            console.log(`Updated provider values to ${0}`);
-        } catch (error) {
-            console.error("Failed to update provider values:", error);
-        }
-    })();
+    try {
+        const randomClient = await getRandomClient();
+        let message = await randomClient.updateProviderAvailableValues(0);
+        console.log(message);
+        console.log(`Updated provider values to 0`);
+    } catch (error) {
+        console.error("Failed to update provider values:", error);
+    }
 }
+
 
 async function getMoreRandom(currentCount: number) {
     const entriesNeeded = MINIMUM_ENTRIES - currentCount;
@@ -385,23 +399,36 @@ async function checkAndFetchIfNeeded(client: Client) {
 
         switch (on_chain_avalible_random.availibleRandomValues) {
             case -1:
-                console.log("Provider is shutting down");
+                console.log("Value is -1");
+                console.log("Provider has been shut down by USER...");
+                console.log("Go to the provider dashboard to turn back on");
                 //TODO prepare for shutdown
                 //TODO the async causes it to ovewrite itself
                 break;
             case -2:
                 console.log("Value is -2");
+                console.log("Provider has been shut down by PROCESS...");
+                console.log("This is due to One of the following: ");
+                console.log("Failing to provide random fast enough (Provider is not responding to random requests and considered unhealthy NO SLASH)");
+                console.log("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)" );
+                console.log("Failing to provide the correct proof for your original random (Provider was detected as malicious for tampering with the random LARGE SLASH)");
+                console.log("Go to the provider dashboard to turn back on");
                 break;
             case -3:
                 console.log("Value is -3");
+                console.log("Provider has been shut down by PROCESS...");
+                console.log("This was likely done as a test or to get the maintainers attention. Contact team if you see this and are not sure why");
+                console.log("Go to the provider dashboard to turn back on");
                 break;
             default:
                 console.log("Value is not -1, -2, or -3");
-                console.log("Value is "+ on_chain_avalible_random.availibleRandomValues)
-                if (on_chain_avalible_random.availibleRandomValues != currentCount) {
+                console.log("Provider is up and working");
+                console.log("Onchain Value is "+ on_chain_avalible_random.availibleRandomValues)
+                console.log("Local Value is "+ currentCount)
+                if (Math.abs(on_chain_avalible_random.availibleRandomValues - currentCount) > UNCHAIN_VS_OFFCHAIN_MAX_DIF) {
                     console.log(`Updating available random values from ${on_chain_avalible_random.availibleRandomValues} to ${currentCount}`);
                     updateAvailableValuesAsync(currentCount);
-                }
+                  }
         }
         if (ongoingRequest) return; // Prevent redundant operations
 
