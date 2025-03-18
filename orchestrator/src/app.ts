@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
-import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig, RandomClientConfigBuilder} from "ao-process-clients"
+import { BaseClientConfig, BaseClientConfigBuilder, GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig, RandomClientConfigBuilder} from "ao-process-clients"
 import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
 import Arweave from 'arweave';
@@ -25,6 +25,22 @@ async function getRandomClient(): Promise<RandomClient> {
     
     return randomClientInstance;
 }
+
+// async function getRandomClient(): Promise<RandomClient> {
+//     if (!randomClientInstance) {
+//         const RANDOM_CONFIG: BaseClientConfigBuilder = await new BaseClientConfigBuilder()
+//             .withWallet(JSON.parse(process.env.WALLET_JSON!))
+//             .withAOConfig({
+//                 CU_URL: "https://cu.randao.net",
+//                 MODE: 'legacy'
+//             })
+//             .build();
+        
+//         randomClientInstance = new RandomClient(RANDOM_CONFIG);
+//     }
+    
+//     return randomClientInstance;
+// }
 
 // async function getStakingClient(): Promise<ProviderStakingClient>{
 //     let test = await getProviderStakingClientAutoConfiguration()
@@ -311,7 +327,8 @@ function addHexPrefix(value: string): string {
 function updateAvailableValuesAsync(currentCount: number) {
     return (async () => {
         try {
-            (await getRandomClient()).updateProviderAvailableValues(currentCount);
+            const randomClient = await getRandomClient();
+            await randomClient.updateProviderAvailableValues(currentCount);
             console.log(`Updated provider values to ${currentCount}`);
         } catch (error) {
             console.error("Failed to update provider values:", error);
@@ -319,17 +336,18 @@ function updateAvailableValuesAsync(currentCount: number) {
     })();
 }
 
+
 async function shutdown() {
-    return (async () => {
-        try {
-            let message = await (await getRandomClient()).updateProviderAvailableValues(0);
-            console.log(message)
-            console.log(`Updated provider values to ${0}`);
-        } catch (error) {
-            console.error("Failed to update provider values:", error);
-        }
-    })();
+    try {
+        const randomClient = await getRandomClient();
+        let message = await randomClient.updateProviderAvailableValues(0);
+        console.log(message);
+        console.log(`Updated provider values to 0`);
+    } catch (error) {
+        console.error("Failed to update provider values:", error);
+    }
 }
+
 
 async function getMoreRandom(currentCount: number) {
     const entriesNeeded = MINIMUM_ENTRIES - currentCount;

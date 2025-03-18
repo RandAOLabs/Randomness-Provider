@@ -8,11 +8,17 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "declaration": true
+    "declaration": true,
+    "skipLibCheck": true,         // ✅ Added to skip library type checking
+    "typeRoots": ["./node_modules/@types"] // ✅ Added to force correct type resolution
   },
   "include": [
-    "src/**/*.ts"
-, "src/db_config.ts", "src/clear_all_output_requests.ts", "src/reset_db.mjs"  ],
+    "src/**/*.ts",
+    "src/db_config.ts",
+    "src/clear_all_output_requests.ts",
+    "src/reset_db.mjs",
+    "src/clear_outputs.tzs"
+  ],
   "exclude": [
     "node_modules"
   ]

@@ -62,7 +62,7 @@ resource "aws_ecs_task_definition" "orchestrator_service" {
   container_definitions = jsonencode([
     {
       name  = "orchestrator"
-      image = "randao/orchestrator:v0.3.2"
+      image = "randao/orchestrator:v0.3.45"
       environment = [
         {
           name  = "ENVIRONMENT"

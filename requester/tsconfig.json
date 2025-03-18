@@ -5,7 +5,9 @@
     "module": "commonjs",
     "target": "es6",
     "strict": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "skipLibCheck": true,         // ✅ Added to skip library type checking
+    "typeRoots": ["./node_modules/@types"] // ✅ Added to force correct type resolution
   },
   "include": [
     "src/**/*.ts"
