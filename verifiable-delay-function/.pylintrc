@@ -1,0 +1,42 @@
+[MASTER]
+# Add the gmpy2 module to the list of known third party modules
+extension-pkg-whitelist=gmpy2
+
+# Python code to execute, usually for sys.path manipulation such as pygtk.require()
+init-hook='import sys; sys.path.append(".")'
+
+[MESSAGES CONTROL]
+# Disable specific warnings
+disable=C0111,  # Missing docstring
+        C0103,  # Invalid name
+        C0303,  # Trailing whitespace
+        E1101,  # No member (since gmpy2 uses dynamic members)
+        R0903,  # Too Few public methods
+
+[TYPECHECK]
+# List of module names for which member attributes should not be checked
+ignored-modules=gmpy2
+
+# List of classes names for which member attributes should not be checked
+ignored-classes=gmpy2.mpz,gmpy2.random_state
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=100
+
+# Number of spaces of indent required inside a hanging or continued line
+indent-after-paren=4
+
+[BASIC]
+# Regular expression which should only match function or class names
+function-rgx=[a-z_][a-z0-9_]{2,50}$
+
+# Regular expression which should only match correct variable names
+variable-rgx=[a-z_][a-z0-9_]{2,30}$
+
+[REPORTS]
+# Set the output format. Available formats are text, parseable, colorized
+output-format=colorized
+
+# Include a brief explanation of each error when errors are displayed
+msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}

@@ -1,21 +1,26 @@
-import gmpy2
-from gmpy2 import mpz, powmod, random_state, mpz_urandomb
+"""File for Verifiable Delay Functions Class"""
+
 from typing import Tuple, List
 from multiprocessing import Pool
 import secrets
+import gmpy2
+
+from gmpy2 import mpz, powmod, random_state, mpz_urandomb
 
 
 class VerifiableDelayFunction:
     def __init__(self, bit_size: int = 2048, T: int = 1000, num_segments: int = 10):
         # Check if T is divisible by num_segments
         if T % num_segments != 0:
-            raise ValueError(f"The total number of squarings (T={T}) must be divisible by the number of segments (num_segments={num_segments}).")
-        
+            raise ValueError(
+                f"The total number of squarings (T={T}) must be divisible by the number of segments (num_segments={num_segments})."
+            )
+
         self.bit_size = bit_size
         self.T = T
         self.num_segments = num_segments
         self.segment_length = T // num_segments
-        
+
         # Seed with a cryptographically secure random integer
         secure_seed = secrets.randbits(256)
         self.rand = random_state(secure_seed)
@@ -30,12 +35,16 @@ class VerifiableDelayFunction:
         self.proof = []
 
         # Instead of squaring `segment_length` times, use exponentiation
-        segment_exp = 2 ** self.segment_length
+        segment_exp = 2**self.segment_length
 
         # Iterate over each segment and apply the batched exponentiation
         for segment in range(self.num_segments):
-            result = powmod(result, segment_exp, self.N)  # Exponentiate by 2^segment_length in a single step
-            self.proof.append(mpz(result))  # Store the intermediate result as part of the proof
+            result = powmod(
+                result, segment_exp, self.N
+            )  # Exponentiate by 2^segment_length in a single step
+            self.proof.append(
+                mpz(result)
+            )  # Store the intermediate result as part of the proof
 
         self.y = result
         return result
@@ -61,7 +70,7 @@ class VerifiableDelayFunction:
         for _ in range(segment_length):
             result = powmod(result, 2, N)
         return result == end_value
-    
+
     def parallel_verify(self, y: mpz, proof: List[mpz]) -> bool:
         """
         Performs parallel verification by checking each proof segment concurrently
@@ -79,11 +88,11 @@ class VerifiableDelayFunction:
             (proof[i - 1] if i > 0 else self.x, proof[i], self.segment_length, self.N)
             for i in range(len(proof))
         ]
-        
+
         # Step 2: Use multiprocessing Pool to verify each segment in parallel
         with Pool() as pool:
             results = pool.map(self.verify_segment, tasks)
-        
+
         # Step 3: Check if all segments verified successfully
         if not all(results):
             print("Parallel verification failed.")
@@ -91,15 +100,16 @@ class VerifiableDelayFunction:
 
         # Final check: Verify that the last computed segment result matches y
         return proof[-1] == y
+
     ##Private##
     def _generate_rsa_modulus(self) -> Tuple[mpz, mpz, mpz]:
         while True:
             # Generate p and q with slightly fewer bits
             p = gmpy2.next_prime(mpz_urandomb(self.rand, self.bit_size // 2 - 1))
             q = gmpy2.next_prime(mpz_urandomb(self.rand, self.bit_size // 2 - 1))
-            
+
             N = p * q
-            
+
             # Check if N is within the desired bit size
             if N.bit_length() <= self.bit_size:
                 return N, p, q
