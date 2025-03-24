@@ -5,10 +5,11 @@ import sys
 from sqlalchemy.exc import OperationalError
 
 # Dynamically add the `src` directory to `sys.path`
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+from src.database.entity import *
 
 from src.database.database import get_engine, Base
-from src.database.entity.verifiable_delay_function_entity import VerifiableDelayFunctionEntity
+
 
 def initialize_database():
     """
@@ -24,6 +25,7 @@ def initialize_database():
     finally:
         engine.dispose()  # Close the engine when done
 
+
 if __name__ == "__main__":
-    
+
     initialize_database()

@@ -1,5 +1,5 @@
 # Project Setup
-This guide will walk you through setting up and running the Verifiable Delay Function (VDF) project in Python.
+This guide will walk you through setting up and running the Time lock puzzle project in Python.
 
 ## Prerequisites
  - Python 3.7+: Make sure you have Python installed on your system.
@@ -39,8 +39,10 @@ python src/database/initialize_db.py
 ## Running the Project
 To generate a VDF proof and verify it, run the main.py script:
 ```bash
-python main.py
+python main.py 10
 ```
+Required Command line Arguments:
+ - count: the number of time lock puzzles to generate and store in the database
 
 ## Running the Tests
 To run the unit tests, use the following command:

@@ -11,13 +11,10 @@ from src.database.entity.RSAEntity import RSAEntity
 from src.database.entity.TimeLockPuzzleEntity import TimeLockPuzzleEntity
 from src.mpc import MPC
 from src.mpc.types import MPZ
+from src.protocol_constants import BIT_SIZE, TIMING_PARAMETER
 from src.rsa.RSA import RSA
 from src.time_lock_puzzle.TimeLockPuzzle import TimeLockPuzzle
 from src.time_lock_puzzle.TimeLockPuzzleFactory import TimeLockPuzzleFactory
-
-# Constants
-BIT_SIZE = 2048  # Size for RSA parameters
-TIMING_PARAMETER = MPC.mpz(3_000_000)  # Number of squarings required
 
 
 class TimeLockPuzzleService:
@@ -68,9 +65,11 @@ class TimeLockPuzzleService:
         print("\nConverting to entities...")
         start_time = time.time()
         entities = []
-        for puzzle, rsa, _ in puzzles:
+        for puzzle, rsa, y in puzzles:
+            # Convert RSA entity first to get its ID (now generated on creation)
             rsa_entity = self.rsa_converter.to_entity(rsa)
-            puzzle_entity = self.puzzle_converter.to_entity(puzzle)
+            # Create puzzle entity with the generated RSA ID
+            puzzle_entity = self.puzzle_converter.to_entity(puzzle, rsa_entity.id, y)
             entities.extend([rsa_entity, puzzle_entity])
         total_time = time.time() - start_time
         print(f"Entity conversion took {total_time:.2f} seconds")
@@ -85,6 +84,7 @@ class TimeLockPuzzleService:
         """
         print("\nSaving to database...")
         start_time = time.time()
+        # Now we can save all entities at once since RSA IDs are generated on creation
         DatabaseService.save_many(entities)
         total_time = time.time() - start_time
         print(f"Database save took {total_time:.2f} seconds")
