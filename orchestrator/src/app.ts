@@ -6,34 +6,19 @@ import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
 import Arweave from 'arweave';
 
-const AO_CONFIG_BASE = {
+const AO_CONFIG = {
     MU_URL: "https://ur-mu.randao.net",
-    //MU_URL: "https://mu.ao-testnet.xyz",
+    CU_URL: "https://ur-cu.randao.net",
     GATEWAY_URL: "https://arweave.net",
 };
 
-const CU_URLS = [
-    "https://ur-cu.randao.net",
-];
-
-// const CU_URLS = [
-//     "https://cu.ao-testnet.xyz"
-// ];
 let randomClientInstance: RandomClient | null = null;
 
 async function getRandomClient(): Promise<RandomClient> {
-    const randomIndex = Math.floor(Math.random() * CU_URLS.length); // Pick a random index
-    const AO_CONFIG = {
-        ...AO_CONFIG_BASE,
-        CU_URL: CU_URLS[randomIndex], // Select a random CU URL
-    };
-
-    console.log(`Using CU_URL: ${AO_CONFIG.CU_URL}`); // Log the selected CU URL
-    
+   
     if (!randomClientInstance) {
         randomClientInstance = ((await RandomClient.defaultBuilder())
             .withAOConfig(AO_CONFIG))
-            .withProcessId("BPafv2apbvSU0SRZEksMULFtKQQb0KvS7PBTPadFVSQ")
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .build();
     }
@@ -50,7 +35,7 @@ const MAX_OUTSTANDING_VDF_CONTAINERS = 10;
 const RANDOM_PER_VDF = 10;
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
-const VDF_JOB_IMAGE = 'randao/vdf_job:v0.1.4';
+const VDF_JOB_IMAGE = 'randao/puzzle-gen:v0.1.1';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
@@ -107,27 +92,44 @@ async function connectWithRetry(): Promise<Client> {
     throw new Error("Failed to connect to PostgreSQL after multiple attempts");
 }
 
-// Setup the `verifiable_delay_functions` table if not exists
+// Function to initialize the PostgreSQL database schema
 async function setupDatabase(client: Client): Promise<void> {
-    await client.query(`
-        CREATE TABLE IF NOT EXISTS verifiable_delay_functions (
-            id TEXT PRIMARY KEY,  
-            request_id TEXT,
-            modulus TEXT NOT NULL,
-            input TEXT NOT NULL,
-            output TEXT NOT NULL,
-            proof JSON NOT NULL,
-            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            detected_completed TIMESTAMP NULL
-        );
-    `);
-
-    // Ensure detected_completed column exists in case the table was created before it was added
-    await client.query(`
-            ALTER TABLE verifiable_delay_functions 
-            ADD COLUMN IF NOT EXISTS detected_completed TIMESTAMP NULL;
+    try {
+        // Drop old tables maybe
+        await client.query(`
+            DROP TABLE IF EXISTS verifiable_delay_functions CASCADE;
         `);
-    console.log("Database setup complete. 'verifiable_delay_functions' table is ready.");
+
+        // Create the rsa_keys table
+        await client.query(`
+            CREATE TABLE rsa_keys (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                p TEXT NOT NULL,
+                q TEXT NOT NULL,
+                modulus TEXT NOT NULL UNIQUE,  -- Store hex string of modulus N
+                phi TEXT NOT NULL
+            );
+        `);
+
+        // Create the time_lock_puzzles table with relation to rsa_keys based on rsa_id
+        await client.query(`
+CREATE TABLE time_lock_puzzles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    x TEXT NOT NULL,
+    y TEXT NOT NULL,
+    t TEXT NOT NULL,
+    modulus TEXT NOT NULL,  -- Store hex string of modulus N
+    request_id TEXT NULL,
+    rsa_id UUID NOT NULL UNIQUE,
+    detected_completed TIMESTAMP NULL, -- Added to track completion time
+    FOREIGN KEY (rsa_id) REFERENCES rsa_keys(id) ON DELETE CASCADE
+);
+        `);
+
+        console.log("✅ Database setup complete. Tables are properly linked on rsa_id.");
+    } catch (error) {
+        console.error("❌ Error setting up database:", error);
+    }
 }
 
 
@@ -164,11 +166,11 @@ async function triggerVDFJobPod(): Promise<string | null> {
     } else {
         // Check if we have reached the maximum number of containers
         if (ongoingContainers.size >= MAX_OUTSTANDING_VDF_CONTAINERS) {
-            console.log(`Maximum outstanding VDF containers (${MAX_OUTSTANDING_VDF_CONTAINERS}) reached. Not starting new container.`);
+            console.log(`Maximum outstanding puzzle-gen containers (${MAX_OUTSTANDING_VDF_CONTAINERS}) reached. Not starting new container.`);
             return null;
         }
 
-        const containerName = `vdf_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+        const containerName = `puzzle-gen_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         console.log(`Starting Docker container with name: ${containerName}`);
         try {
             if (!pulledDockerimage) {
@@ -188,7 +190,7 @@ async function triggerVDFJobPod(): Promise<string | null> {
             }
             const container = await docker.createContainer({
                 Image: VDF_JOB_IMAGE,
-                Cmd: ['sh', '-c', `for i in $(seq 1 ${RANDOM_PER_VDF}); do python main.py; done`],
+                Cmd: ['sh', '-c', `python3 main.py ${RANDOM_PER_VDF}`],
                 Env: [
                     `DATABASE_TYPE=postgresql`,
                     `DATABASE_HOST=${dbConfig.host}`,
@@ -293,7 +295,7 @@ function isDockerError(error: unknown): error is { statusCode: number } {
 // Function to process hex output for 64-bit modulus
 function hexMod64Bit(expectedOutput: string): { expectedOutput64BitBase10: string } {
     // Parse the hexadecimal string into a BigInt
-    const number = BigInt(`0x${expectedOutput}`);
+    const number = BigInt(`${expectedOutput}`);
 
     // Define the 64-bit modulus (2^64 - 1)
     const modulus = BigInt("0x7FFFFFFFF");
@@ -308,11 +310,6 @@ function hexMod64Bit(expectedOutput: string): { expectedOutput64BitBase10: strin
     return {
         expectedOutput64BitBase10: remainder.toString(),
     };
-}
-
-// Function to prepend 0x to hex strings
-function addHexPrefix(value: string): string {
-    return value.startsWith('0x') ? value : `0x${value}`;
 }
 
 function updateAvailableValuesAsync(currentCount: number) {
@@ -383,7 +380,7 @@ async function checkAndFetchIfNeeded(client: Client) {
         const on_chain_avalible_random = await getProviderAvailableRandomValues(PROVIDER_ID);
         // Query current count of usable DB entries
         const res = await client.query(
-            'SELECT COUNT(*) AS count FROM verifiable_delay_functions WHERE request_id IS NULL'
+            'SELECT COUNT(*) AS count FROM time_lock_puzzles WHERE request_id IS NULL'
         );
         const currentCount = parseInt(res.rows[0].count, 10);
         console.log("Total usable DB entries: " + currentCount);
@@ -439,8 +436,8 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
     try {
         // Fetch the necessary details from the database using requestId
         const res = await client.query(
-            `SELECT id, modulus, input 
-             FROM verifiable_delay_functions 
+            `SELECT id, modulus, x 
+             FROM time_lock_puzzles 
              WHERE request_id = $1`,
             [requestId]
         );
@@ -450,16 +447,18 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
             return;
         }
 
-        const { id: dbId, modulus, input } = res.rows[0];
+        const { id: dbId, modulus, x: input } = res.rows[0];
 
         console.log(`${parentLogId} Fetched entry details - Request ID: ${requestId}, DB ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
 
-        // Add hex prefix to modulus and input
-        const hexModulus = addHexPrefix(modulus);
-        const hexInput = addHexPrefix(input);
-
         console.log(`${parentLogId} Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
-        await (await getRandomClient()).postVDFChallenge(requestId, hexModulus, hexInput);
+        await (await getRandomClient()).commit({
+            requestId: requestId,
+            puzzle: {
+                input: input,
+                modulus: modulus
+            }
+        });
         console.log(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
     } catch (error) {
         console.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
@@ -472,27 +471,39 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
 async function fulfillRandomOutput(client: Client, requestId: string, parentLogId: string): Promise<void> {
     try {
         // Fetch the output and proof from the database using the requestId
-        const res = await client.query('SELECT id, output, proof FROM verifiable_delay_functions WHERE request_id = $1', [requestId]);
+        const res = await client.query(
+            `SELECT 
+                tlp.id, 
+                tlp.y AS output, 
+                rk.p, 
+                rk.q 
+            FROM time_lock_puzzles tlp
+            JOIN rsa_keys rk ON tlp.rsa_id = rk.id
+            WHERE tlp.request_id = $1`, 
+            [requestId]
+        );
+        
         if (!res.rowCount) {
             console.error(`No entry found for request ID: ${requestId}`);
             return;
         }
-        const { id: dbId, output, proof } = res.rows[0];
-
-        console.log(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}`);
-
-        // Process the output through hexMod64Bit
-        const processedOutput = hexMod64Bit(output).expectedOutput64BitBase10;
-        console.log(`${parentLogId} Processed output: ${processedOutput}  For request ID: ${requestId}`);
-        // Process the proof array - add hex prefix to each element
-        let processedProof = proof;
-        if (Array.isArray(proof)) {
-            processedProof = proof.map(element => addHexPrefix(element));
-        }
-        const proofString = JSON.stringify(processedProof);
+       // Map the response to structured variables
+const { 
+    id: dbId, 
+    output,  // Mapping 'y' to 'output'
+    p: rsaP, 
+    q: rsaQ 
+} = res.rows[0];
+        console.log(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}, output: ${output}, rsaP: ${rsaP}, rsaQ ${rsaQ} `);
 
         console.log(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
-        await (await getRandomClient()).postVDFOutputAndProof(requestId, processedOutput, proofString);
+        await (await getRandomClient()).reveal({
+            requestId: requestId,
+            rsa_key: {
+                p: rsaP,
+                q: rsaQ
+            }
+        })
         console.log(`${parentLogId} Proof posted for request ID: ${requestId}`);
     } catch (error) {
         console.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
@@ -631,7 +642,9 @@ async function polling(client: any) {
             (async () => {
                 const s4 = Date.now();
                 console.log(`${logId} Step 4 started.`);
-                await cleanupFulfilledEntries(client, openRequests, logId);
+
+                //TODO enable this again later
+                //await cleanupFulfilledEntries(client, openRequests, logId);
                 stepTracking.step4 = { completed: true, timeTaken: Date.now() - s4 };
                 console.log(`${logId} Step 4 completed. Time taken: ${stepTracking.step4.timeTaken}ms`);
             })(),
@@ -667,77 +680,87 @@ async function processChallengeRequests(
 
     try {
         await client.query('BEGIN'); // Start transaction
-
+    
         console.log(`${parentLogId} Fetching existing request mappings.`);
+        
         // Fetch already assigned request_id -> dbId mappings
         const existingMappingsRes = await client.query(
-            `SELECT request_id FROM verifiable_delay_functions 
+            `SELECT request_id FROM time_lock_puzzles 
              WHERE request_id = ANY($1) 
              FOR UPDATE SKIP LOCKED`,
             [requestIds]
         );
-
+    
         const existingRequestIds = new Set(existingMappingsRes.rows.map(row => row.request_id));
         console.log(`${parentLogId} Found ${existingRequestIds.size} already mapped requests.`);
-
+    
         // Find only the unmapped requests (requestIds not in existingRequestIds)
         const unmappedRequestIds = requestIds.filter(requestId => !existingRequestIds.has(requestId));
         console.log(`${parentLogId} Unmapped requests: ${unmappedRequestIds.length}`);
-
-        // Fetch available DB entries for unmapped requests
-        console.log(`${parentLogId} Fetching available DB entries.`);
-        const dbRes = await client.query(
-            `SELECT id FROM verifiable_delay_functions 
-             WHERE request_id IS NULL 
-             ORDER BY id ASC 
-             LIMIT $1 
-             FOR UPDATE SKIP LOCKED`,
-            [unmappedRequestIds.length]
-        );
-
-        const availableDbEntries = dbRes.rows.map(row => row.id);
-        console.log(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
-
-        // Reduce request list if we don’t have enough DB entries
-        if (availableDbEntries.length < unmappedRequestIds.length) {
-            console.log(`${parentLogId} Limiting requests to ${availableDbEntries.length} due to DB availability.`);
-            unmappedRequestIds.length = availableDbEntries.length;
+    
+        let mappedEntries: { requestId: string, dbId: number }[] = [];
+    
+        if (unmappedRequestIds.length > 0) {
+            console.log(`${parentLogId} Fetching available DB entries.`);
+            const dbRes = await client.query(
+                `SELECT id FROM time_lock_puzzles 
+                 WHERE request_id IS NULL 
+                 ORDER BY id ASC 
+                 LIMIT $1 
+                 FOR UPDATE SKIP LOCKED`,
+                [unmappedRequestIds.length]
+            );
+    
+            const availableDbEntries = dbRes.rows.map(row => row.id);
+            console.log(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
+    
+            if (availableDbEntries.length > 0) {
+                const numMappings = Math.min(unmappedRequestIds.length, availableDbEntries.length);
+    
+                for (let i = 0; i < numMappings; i++) {
+                    await client.query(
+                        `UPDATE time_lock_puzzles 
+                         SET request_id = $1 
+                         WHERE id = $2`,
+                        [unmappedRequestIds[i], availableDbEntries[i]]
+                    );
+                    mappedEntries.push({ requestId: unmappedRequestIds[i], dbId: availableDbEntries[i] });
+                    console.log(`${parentLogId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
+                }
+            } else {
+                console.log(`${parentLogId} No available DB entries for unmapped requests.`);
+            }
         }
-
-        if (availableDbEntries.length === 0 && existingRequestIds.size === 0) {
-            console.log(`${parentLogId} No available DB entries to process and no existing mappings.`);
-            await client.query('COMMIT'); // Commit to release locks
+    
+        // Collect all request IDs (previously mapped + newly mapped)
+        const allRequestIds = [...existingRequestIds, ...mappedEntries.map(entry => entry.requestId)];
+    
+        if (allRequestIds.length === 0) {
+            console.log(`${parentLogId} No requests to process. Committing transaction.`);
+            await client.query('COMMIT');
             return;
         }
-
-        // Map unmapped requestIds to available DB entries (1:1)
-        for (let i = 0; i < unmappedRequestIds.length; i++) {
-            await client.query(
-                `UPDATE verifiable_delay_functions 
-                 SET request_id = $1 
-                 WHERE id = $2`,
-                [unmappedRequestIds[i], availableDbEntries[i]]
-            );
-            console.log(`${parentLogId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
-        }
-
+    
         await client.query('COMMIT'); // Commit all updates at once
-
-        // Call fulfillRandomChallenge for all request IDs (existing + newly mapped)
-        // Create an array of promises and use Promise.all to await them all in parallel
-        const promises = requestIds.map(requestId =>
-            fulfillRandomChallenge(client, requestId, parentLogId)
-                .catch(error => console.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
+        console.log(`${parentLogId} Committed all changes. Now fulfilling challenges.`);
+    
+        // Call fulfillRandomChallenge for all request IDs
+        await Promise.all(
+            allRequestIds.map(requestId => 
+                fulfillRandomChallenge(client, requestId, parentLogId)
+                    .catch(error => console.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
+            )
         );
-
-        await Promise.all(promises); // Wait for all promises to resolve
+    
         console.log(`${parentLogId} All challenges fulfilled`);
-
-        console.log(`${parentLogId} Step 2 completed.`);
-    } catch (error) {
+    } catch (error:any) {
         console.error(`${parentLogId} Error in processChallengeRequests:`, error);
         await client.query('ROLLBACK'); // Rollback on failure
+    
+        console.error(`SQL State: ${error.code}, Message: ${error.message}`);
     }
+    
+    
 }
 
 // Step 3: Process Output Requests (unchanged but with logging)
@@ -782,7 +805,7 @@ async function cleanupFulfilledEntries(
         // Fetch all entries with a request_id
         const result = await client.query(`
             SELECT id, request_id, detected_completed 
-            FROM verifiable_delay_functions 
+            FROM time_lock_puzzles 
             WHERE request_id IS NOT NULL
         `);
 
@@ -810,20 +833,28 @@ async function cleanupFulfilledEntries(
         // Mark entries as completed
         if (markAsCompleted.length > 0) {
             await client.query(`
-                UPDATE verifiable_delay_functions
+                UPDATE time_lock_puzzles
                 SET detected_completed = NOW()
                 WHERE id = ANY($1)
             `, [markAsCompleted]);
             console.log(`${parentLogId} Marked ${markAsCompleted.length} entries as completed.`);
         }
 
-        // Delete old completed entries
+        // Delete old completed entries //TODO make sure its cleaning up BOTH tables
         if (markForDeletion.length > 0) {
             await client.query(`
-                DELETE FROM verifiable_delay_functions
-                WHERE id = ANY($1)
+                DELETE FROM rsa_keys
+                WHERE id IN (
+                    SELECT rsa_id FROM time_lock_puzzles WHERE id = ANY($1)
+                );
             `, [markForDeletion]);
-            console.log(`${parentLogId} Deleted ${markForDeletion.length} old completed entries.`);
+        
+            await client.query(`
+                DELETE FROM time_lock_puzzles
+                WHERE id = ANY($1);
+            `, [markForDeletion]);
+        
+            console.log(`${parentLogId} Deleted ${markForDeletion.length} old completed entries and corresponding RSA keys.`);
         }
 
         await client.query('COMMIT');
@@ -849,7 +880,7 @@ async function run(): Promise<void> {
     });
 
     setInterval(async () => {
-        const res = await client.query('SELECT COUNT(*) as count FROM verifiable_delay_functions');
+        const res = await client.query('SELECT COUNT(*) as count FROM time_lock_puzzles');
         console.log(`Periodic log - Current database size: ${res.rows[0].count}`);
         // Check and fetch entries for the database if needed
         console.log("Step 0: Checking and fetching database entries if below threshold.");

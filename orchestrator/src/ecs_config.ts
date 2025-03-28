@@ -60,7 +60,7 @@ export async function launchVDFTask(
       containerOverrides: [
         {
           name: 'vdf_job_container', // Must match the container name in the task definition
-          command: ['sh', '-c', `for i in $(seq 1 ${random_per_vdf}); do python main.py; done`],
+          command: ['sh', '-c', `python3 main.py ${random_per_vdf}`],
         },
       ],
     },
