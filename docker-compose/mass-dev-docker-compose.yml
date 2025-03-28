@@ -21,7 +21,7 @@ services:
       retries: 5
 
   orchestrator1:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres1:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
       retries: 5
 
   orchestrator2:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres2:
         condition: service_healthy
@@ -99,7 +99,7 @@ services:
       retries: 5
 
   orchestrator3:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres3:
         condition: service_healthy
@@ -138,7 +138,7 @@ services:
       retries: 5
 
   orchestrator4:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres4:
         condition: service_healthy
@@ -177,7 +177,7 @@ services:
       retries: 5
 
   orchestrator5:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres5:
         condition: service_healthy
@@ -216,7 +216,7 @@ services:
       retries: 5
 
   orchestrator6:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres6:
         condition: service_healthy
@@ -255,7 +255,7 @@ services:
       retries: 5
 
   orchestrator7:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres7:
         condition: service_healthy
@@ -294,7 +294,7 @@ services:
       retries: 5
 
   orchestrator8:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres8:
         condition: service_healthy
@@ -333,7 +333,7 @@ services:
       retries: 5
 
   orchestrator9:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres9:
         condition: service_healthy
@@ -372,7 +372,7 @@ services:
       retries: 5
 
   orchestrator10:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres10:
         condition: service_healthy
@@ -411,7 +411,7 @@ services:
       retries: 5
 
   orchestrator11:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres11:
         condition: service_healthy
@@ -450,7 +450,7 @@ services:
       retries: 5
 
   orchestrator12:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres12:
         condition: service_healthy
@@ -489,7 +489,7 @@ services:
       retries: 5
 
   orchestrator13:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres13:
         condition: service_healthy
@@ -528,7 +528,7 @@ services:
       retries: 5
 
   orchestrator14:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres14:
         condition: service_healthy
@@ -567,7 +567,7 @@ services:
       retries: 5
 
   orchestrator15:
-    image: randao/orchestrator:v0.3.92
+    image: randao/orchestrator:v0.3.99
     depends_on:
       postgres15:
         condition: service_healthy
