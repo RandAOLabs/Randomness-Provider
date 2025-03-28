@@ -9,7 +9,7 @@ import {
     RandomClientConfigBuilder,
 } from "ao-process-clients";
 
-const RETRY_DELAY_MS = 10000; // 10 seconds
+const RETRY_DELAY_MS = 60000; // 60 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -17,14 +17,48 @@ const CHANCE_TO_CALL_RANDOM = 1;
 let cachedProviders: string[] = [];
 let lastProviderRefresh = 0;
 
-async function getRandomClient(): Promise<RandomClient>{
-    //     let test = await getRandomClientAutoConfiguration()
-    // test.wallet = JSON.parse(process.env.WALLET_JSON!)
+const AO_CONFIG_BASE = {
+    MU_URL: "https://ur-mu.randao.net",
+    // MU_URL: "https://mu.ao-testnet.xyz",
+    GATEWAY_URL: "https://arweave.net",
+};
+
+const CU_URLS = [
+    "https://ur-cu.randao.net",
+    //"https://cu2.randao.net",
+    //"https://cu3.randao.net",
+   //"https://cu4.randao.net",
+    //"https://cu5.randao.net",
+    //"https://cu6.randao.net:444"
+];
+
+// const CU_URLS = [
+//     "https://cu.ao-testnet.xyz"
+// ];
+
+let randomClientInstance: RandomClient | null = null;
+
+async function getRandomClient(): Promise<RandomClient> {
+    const randomIndex = Math.floor(Math.random() * CU_URLS.length); // Pick a random index
+    const AO_CONFIG = {
+        ...AO_CONFIG_BASE,
+        CU_URL: CU_URLS[randomIndex], // Select a random CU URL
+    };
+
+    console.log(`Using CU_URL: ${AO_CONFIG.CU_URL}`); // Log the selected CU URL
     
-    const RANDOM_CONFIG: RandomClientConfig = await new RandomClientConfigBuilder().withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!)).build()
-    const randclient = new RandomClient(RANDOM_CONFIG)
-        return randclient
+    if (!randomClientInstance) {
+        randomClientInstance = ((await RandomClient.defaultBuilder())
+            .withAOConfig(AO_CONFIG))
+            .withProcessId("BPafv2apbvSU0SRZEksMULFtKQQb0KvS7PBTPadFVSQ")
+            .withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!))
+            .build();
     }
+    return randomClientInstance;
+}
+
+
+
 let totalRandomCalled = 0;
 let totalTimeToFulfill = 0;
 let fulfilledRequests = 0;
@@ -54,6 +88,7 @@ async function getRandomProviders(randclient: RandomClient): Promise<{ providers
         // Create the actual provider fetch promise
         const fetchPromise = async () => {
             const providerInfo = await randclient.getAllProviderActivity();
+            console.log(providerInfo)
             const eligibleProviders = providerInfo
             //@ts-ignore
                 .filter(provider => provider.active === 1)
@@ -115,6 +150,7 @@ async function main() {
                 const { providers, count } = await getRandomProviders(randclient);
                 console.log(`Selected ${count} providers:`, providers);
                 await randclient.createRequest(providers, count, callbackId);
+                //await randclient.createRequest(["X1tqliRkKnClhVQ4aIeyuOaPTzr5PfnxqAoSdpTzZy8"], 1, "123");
                 totalRandomCalled++;
                 console.log("Random request initiated. Awaiting request ID in open requests...");
             }
