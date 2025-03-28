@@ -18,8 +18,8 @@ class RSAConverter:
             RSAEntity: The database entity
         """
         return RSAEntity(
-            hex(rsa.get_p()),
-            hex(rsa.get_q()),
-            hex(rsa.get_N()),
-            hex(rsa.get_phi()),
+            hex(rsa.get_p())[2:],  # remove 0x
+            hex(rsa.get_q())[2:],  # remove 0x
+            hex(rsa.get_N())[2:],  # remove 0x
+            hex(rsa.get_phi())[2:],  # remove 0x
         )
