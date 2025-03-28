@@ -62,7 +62,7 @@ resource "aws_ecs_task_definition" "orchestrator_service" {
   container_definitions = jsonencode([
     {
       name  = "orchestrator"
-      image = "randao/orchestrator:v0.3.99"
+      image = "randao/orchestrator:v0.4.2"
       environment = [
         {
           name  = "ENVIRONMENT"
@@ -144,7 +144,7 @@ resource "aws_ecs_task_definition" "vdf_job" {
   container_definitions = jsonencode([
     {
       name  = "vdf_job_container"
-      image = "randao/vdf_job:v0.1.4"
+      image = "randao/puzzle-gen:v0.1.1"
       command = ["python", "main.py"],
       environment = [
         {
