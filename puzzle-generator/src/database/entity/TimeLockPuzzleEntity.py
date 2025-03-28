@@ -20,7 +20,7 @@ class TimeLockPuzzleEntity(Base, Saveable):
     x = Column(String, nullable=False)  # Store hex string of input value x
     y = Column(String, nullable=False)  # Store hex string of y value
     t = Column(String, nullable=False)  # Store base 10 string of time parameter t
-    N = Column(String, nullable=False)  # Store hex string of modulus N
+    modulus = Column(String, nullable=False)  # Store hex string of modulus N
     request_id = Column(
         String, nullable=True
     )  # Optional associated randomness request id (will be filled within the provider node runtime)
@@ -45,5 +45,5 @@ class TimeLockPuzzleEntity(Base, Saveable):
         self.x = x_hex
         self.y = y_hex
         self.t = t
-        self.N = N_hex
+        self.modulus = N_hex
         self.rsa_id = rsa_id

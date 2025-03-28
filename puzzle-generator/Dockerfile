@@ -1,5 +1,5 @@
 # Use an official Python image as a base
-FROM python:3.8-slim
+FROM python:3.12
 
 # Install system dependencies needed for gmpy2 and PostgreSQL connection
 RUN apt-get update && apt-get install -y \
