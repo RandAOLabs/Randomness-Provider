@@ -9,7 +9,7 @@ import {
     RandomClientConfigBuilder,
 } from "ao-process-clients";
 
-const RETRY_DELAY_MS = 60000; // 60 seconds
+const RETRY_DELAY_MS = 2000; // 2 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -17,40 +17,20 @@ const CHANCE_TO_CALL_RANDOM = 1;
 let cachedProviders: string[] = [];
 let lastProviderRefresh = 0;
 
-const AO_CONFIG_BASE = {
+const AO_CONFIG = {
     MU_URL: "https://ur-mu.randao.net",
-    // MU_URL: "https://mu.ao-testnet.xyz",
+    Cu_URL: "https://ur-cu.randao.net",
     GATEWAY_URL: "https://arweave.net",
 };
-
-const CU_URLS = [
-    "https://ur-cu.randao.net",
-    //"https://cu2.randao.net",
-    //"https://cu3.randao.net",
-   //"https://cu4.randao.net",
-    //"https://cu5.randao.net",
-    //"https://cu6.randao.net:444"
-];
-
-// const CU_URLS = [
-//     "https://cu.ao-testnet.xyz"
-// ];
 
 let randomClientInstance: RandomClient | null = null;
 
 async function getRandomClient(): Promise<RandomClient> {
-    const randomIndex = Math.floor(Math.random() * CU_URLS.length); // Pick a random index
-    const AO_CONFIG = {
-        ...AO_CONFIG_BASE,
-        CU_URL: CU_URLS[randomIndex], // Select a random CU URL
-    };
-
-    console.log(`Using CU_URL: ${AO_CONFIG.CU_URL}`); // Log the selected CU URL
     
     if (!randomClientInstance) {
         randomClientInstance = ((await RandomClient.defaultBuilder())
             .withAOConfig(AO_CONFIG))
-            .withProcessId("BPafv2apbvSU0SRZEksMULFtKQQb0KvS7PBTPadFVSQ")
+            .withProcessId("2ExUldxQ5NA_hnElSWYq0_lCBgeQQPxPhFbWDFihDEY")
             .withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!))
             .build();
     }

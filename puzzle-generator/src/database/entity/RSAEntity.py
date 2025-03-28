@@ -18,7 +18,7 @@ class RSAEntity(Base, Saveable):
     id = Column(String, primary_key=True)  # Unique generated string ID
     p = Column(String, nullable=False)  # Store hex string of prime p
     q = Column(String, nullable=False)  # Store hex string of prime q
-    N = Column(String, nullable=False)  # Store hex string of modulus N
+    modulus = Column(String, nullable=False)  # Store hex string of modulus N
     phi = Column(String, nullable=False)  # Store hex string of Euler's totient
     puzzle = relationship(
         "TimeLockPuzzleEntity", back_populates="rsa", uselist=False
@@ -39,5 +39,5 @@ class RSAEntity(Base, Saveable):
         self.id = str(uuid.uuid4())  # Generate ID on creation
         self.p = p_hex
         self.q = q_hex
-        self.N = N_hex
+        self.modulus = N_hex
         self.phi = phi_hex

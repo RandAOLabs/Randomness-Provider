@@ -53,3 +53,18 @@ With coverage:
 ```bash
 pytest --cov=src
 ```
+
+
+
+
+
+
+# Build the Docker image with the version tag
+docker build -t randao/puzzle-gen:latest -t randao/puzzle-gen:v0.1.1 .
+
+# Log in to Docker
+docker login
+
+# Push the image with the version tag
+docker push randao/puzzle-gen:latest
+docker push randao/puzzle-gen:v0.1.1
