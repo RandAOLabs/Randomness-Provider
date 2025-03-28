@@ -21,9 +21,9 @@ class TimeLockPuzzleConverter:
             TimeLockPuzzleEntity: The database entity
         """
         return TimeLockPuzzleEntity(
-            x_hex=hex(puzzle.get_x()),
-            y_hex=hex(y),
-            t=str(puzzle.get_t()),
-            N_hex=hex(puzzle.get_N()),
+            x_hex=hex(puzzle.get_x())[2:],  # remove 0x
+            y_hex=hex(y)[2:],  # remove 0x
+            t=str(puzzle.get_t()),  # remove 0x
+            N_hex=hex(puzzle.get_N())[2:],  # remove 0x
             rsa_id=rsa_id,
         )
