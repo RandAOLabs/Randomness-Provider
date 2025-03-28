@@ -6,53 +6,44 @@ import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
 import Arweave from 'arweave';
 
-// const RANDOM_CONFIG: RandomClientConfig = {
-//     wallet: JSON.parse(process.env.WALLET_JSON!),
-//     tokenProcessId: '',
-//     processId: ''
-// }
-//const randclient: IRandomClient = RandomClient.autoConfiguration()
+const AO_CONFIG_BASE = {
+    MU_URL: "https://ur-mu.randao.net",
+    //MU_URL: "https://mu.ao-testnet.xyz",
+    GATEWAY_URL: "https://arweave.net",
+};
+
+const CU_URLS = [
+    "https://ur-cu.randao.net",
+];
+
+// const CU_URLS = [
+//     "https://cu.ao-testnet.xyz"
+// ];
 let randomClientInstance: RandomClient | null = null;
 
 async function getRandomClient(): Promise<RandomClient> {
+    const randomIndex = Math.floor(Math.random() * CU_URLS.length); // Pick a random index
+    const AO_CONFIG = {
+        ...AO_CONFIG_BASE,
+        CU_URL: CU_URLS[randomIndex], // Select a random CU URL
+    };
+
+    console.log(`Using CU_URL: ${AO_CONFIG.CU_URL}`); // Log the selected CU URL
+    
     if (!randomClientInstance) {
-        const RANDOM_CONFIG: RandomClientConfig = await new RandomClientConfigBuilder()
+        randomClientInstance = ((await RandomClient.defaultBuilder())
+            .withAOConfig(AO_CONFIG))
+            .withProcessId("BPafv2apbvSU0SRZEksMULFtKQQb0KvS7PBTPadFVSQ")
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .build();
-        
-        randomClientInstance = new RandomClient(RANDOM_CONFIG);
     }
-    
     return randomClientInstance;
 }
-
-// async function getRandomClient(): Promise<RandomClient> {
-//     if (!randomClientInstance) {
-//         const RANDOM_CONFIG: BaseClientConfigBuilder = await new BaseClientConfigBuilder()
-//             .withWallet(JSON.parse(process.env.WALLET_JSON!))
-//             .withAOConfig({
-//                 CU_URL: "https://cu.randao.net",
-//                 MODE: 'legacy'
-//             })
-//             .build();
-        
-//         randomClientInstance = new RandomClient(RANDOM_CONFIG);
-//     }
-    
-//     return randomClientInstance;
-// }
-
-// async function getStakingClient(): Promise<ProviderStakingClient>{
-//     let test = await getProviderStakingClientAutoConfiguration()
-// test.wallet = JSON.parse(process.env.WALLET_JSON!)
-// const randclient = new ProviderStakingClient(test)
-//     return randclient
-// }
 
 
 const docker = new Docker();
 // Constants for configuration
-const POLLING_INTERVAL_MS = 1000;
+const POLLING_INTERVAL_MS = 10000;
 const MINIMUM_ENTRIES = 1000;
 const DRYRUNTIMEOUT = 30000; // 30 seconds
 const MAX_OUTSTANDING_VDF_CONTAINERS = 10;
