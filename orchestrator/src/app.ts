@@ -13,17 +13,27 @@ const AO_CONFIG = {
 };
 
 let randomClientInstance: RandomClient | null = null;
+let lastInitTime: number = 0;
+const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
 
 async function getRandomClient(): Promise<RandomClient> {
-   
-    if (!randomClientInstance) {
+    const currentTime = Date.now();
+    
+    if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
         randomClientInstance = ((await RandomClient.defaultBuilder())
             .withAOConfig(AO_CONFIG))
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .build();
+        lastInitTime = currentTime;
     }
+    
     return randomClientInstance;
 }
+
+// Optional: Auto-reinitialize on a timer
+setInterval(() => {
+    randomClientInstance = null;
+}, REINIT_INTERVAL);
 
 
 const docker = new Docker();
