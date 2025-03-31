@@ -9,7 +9,7 @@ import {
     RandomClientConfigBuilder,
 } from "ao-process-clients";
 
-const RETRY_DELAY_MS = 2000; // 2 seconds
+const RETRY_DELAY_MS = 10000; // 10 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;

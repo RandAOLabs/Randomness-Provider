@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
-import { BaseClientConfig, BaseClientConfigBuilder, GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RandomClientConfig, RandomClientConfigBuilder} from "ao-process-clients"
+import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient} from "ao-process-clients"
 import { dbConfig } from './db_config.js';
 import { getNetworkConfig, launchVDFTask, NetworkConfig } from './ecs_config';
 import Arweave from 'arweave';
@@ -31,11 +31,9 @@ const docker = new Docker();
 const POLLING_INTERVAL_MS = 10000;
 const MINIMUM_ENTRIES = 1000;
 const DRYRUNTIMEOUT = 30000; // 30 seconds
-const MAX_OUTSTANDING_VDF_CONTAINERS = 10;
-const RANDOM_PER_VDF = 10;
+const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.1';
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 10000;
-const VDF_JOB_IMAGE = 'randao/puzzle-gen:v0.1.1';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
@@ -133,7 +131,7 @@ CREATE TABLE time_lock_puzzles (
 }
 
 
-async function triggerVDFJobPod(): Promise<string | null> {
+async function triggerTimePuzzleJobPod(randomCount: number): Promise<string | null> {
     if (ENVIRONMENT === 'cloud') {
         try {
             console.log("Cloud environment detected. Launching ECS task.");
@@ -145,7 +143,7 @@ async function triggerVDFJobPod(): Promise<string | null> {
                 console.log("Network config:", cachedNetworkConfig);
             }
 
-            const taskArn = await launchVDFTask(ecs, cachedNetworkConfig, RANDOM_PER_VDF);
+            const taskArn = await launchVDFTask(ecs, cachedNetworkConfig, randomCount);
             if (taskArn) {
                 ongoingContainers.add(taskArn);
                 console.log(`ECS task started successfully: ${taskArn}`);
@@ -164,19 +162,13 @@ async function triggerVDFJobPod(): Promise<string | null> {
             return null;
         }
     } else {
-        // Check if we have reached the maximum number of containers
-        if (ongoingContainers.size >= MAX_OUTSTANDING_VDF_CONTAINERS) {
-            console.log(`Maximum outstanding puzzle-gen containers (${MAX_OUTSTANDING_VDF_CONTAINERS}) reached. Not starting new container.`);
-            return null;
-        }
-
         const containerName = `puzzle-gen_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         console.log(`Starting Docker container with name: ${containerName}`);
         try {
             if (!pulledDockerimage) {
-                console.log(`Pulling image: ${VDF_JOB_IMAGE}`);
+                console.log(`Pulling image: ${TIME_PUZZLE_JOB_IMAGE}`);
                 await new Promise((resolve, reject) => {
-                    docker.pull(VDF_JOB_IMAGE, (err: any, stream: NodeJS.ReadableStream) => {
+                    docker.pull(TIME_PUZZLE_JOB_IMAGE, (err: any, stream: NodeJS.ReadableStream) => {
                         if (err) {
                             return reject(err);
                         }
@@ -189,8 +181,9 @@ async function triggerVDFJobPod(): Promise<string | null> {
                 pulledDockerimage = true;
             }
             const container = await docker.createContainer({
-                Image: VDF_JOB_IMAGE,
-                Cmd: ['sh', '-c', `python3 main.py ${RANDOM_PER_VDF}`],
+                Image: TIME_PUZZLE_JOB_IMAGE,
+                Cmd: ['sh', '-c', `python3 main.py ${randomCount}`],
+
                 Env: [
                     `DATABASE_TYPE=postgresql`,
                     `DATABASE_HOST=${dbConfig.host}`,
@@ -339,38 +332,28 @@ async function shutdown() {
 
 async function getMoreRandom(currentCount: number) {
     const entriesNeeded = MINIMUM_ENTRIES - currentCount;
-    //TODO this math looked wrong in https://discord.com/channels/1209645894039896074/1333434937537204336/1336000074765045853
     console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries...`);
 
     ongoingRequest = true;
 
-    // Calculate how many containers to spawn
-    const possibleBatchCount = Math.ceil(entriesNeeded / RANDOM_PER_VDF);
-    const availableSpawns = Math.min(
-        possibleBatchCount,
-        MAX_OUTSTANDING_VDF_CONTAINERS - ongoingContainers.size
-    );
-
-    if (availableSpawns <= 0) {
-        console.log("Max outstanding containers reached. Skipping new container launches.");
-        ongoingRequest = false;
-        return;
+    if (ongoingContainers.size > 0) {
+        console.log("A puzzle-gen container is already running. Skipping new container launch.");
+        return null;
     }
 
-    console.log(`Spawning up to ${availableSpawns} containers to generate random values.`);
+    console.log(`Spawning a single container to generate ${entriesNeeded} random values.`);
 
-    for (let i = 0; i < availableSpawns; i++) {
-        try {
-            const jobId = await triggerVDFJobPod();
-            if (jobId) {
-                console.log(`Job triggered: ${jobId}`);
-                ongoingContainers.add(jobId);
-            }
-        } catch (error) {
-            console.error('Error triggering job pod:', error);
+    try {
+        const jobId = await triggerTimePuzzleJobPod(entriesNeeded);
+        if (jobId) {
+            console.log(`Job triggered: ${jobId}`);
+            ongoingContainers.add(jobId);
         }
+    } catch (error) {
+        console.error('Error triggering job pod:', error);
     }
 }
+
 
 
 // Function to check and fetch database entries as needed
