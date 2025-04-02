@@ -64,6 +64,53 @@ This deployment creates three containerized services:
 - **Simplified Management**: Easy to manage with standard Docker commands
 - **Lower Technical Barrier**: Simpler for those familiar with containerization
 
+## Troubleshooting
+
+If you encounter issues with your provider, here are some common problems and solutions:
+
+### "Provider Not Found" Error
+- Ensure your provider is properly staked at https://providers_randao.ar.io
+- Wait for blockchain confirmation as it may take some time for your stake to be recognized
+- Check your wallet configuration in the `.env` file
+
+### Network Connectivity Issues
+- If your provider can't connect to the network, it may be due to network congestion
+- Wait for network conditions to improve before attempting to restart
+- Check your internet connection and firewall settings
+
+### Slow or Unresponsive Provider
+- Check system resources to ensure your host has sufficient CPU and memory
+- Monitor the logs for any error messages or warnings:
+  ```bash
+  docker-compose logs -f
+  ```
+- If the puzzle generator is struggling, consider scaling up your hardware
+
+### General Issues
+- Try restarting the containers:
+  ```bash
+  docker-compose restart
+  ```
+- For more persistent issues, you can try a full reset:
+  ```bash
+  docker-compose down
+  docker-compose up -d
+  ```
+- Ensure your container has the latest version:
+  ```bash
+  docker-compose pull
+  docker-compose down
+  docker-compose up -d
+  ```
+
+### Database Issues
+- If the database container fails to start, check logs for specific errors:
+  ```bash
+  docker-compose logs db
+  ```
+- Ensure the database password in your `.env` file doesn't contain special characters that need escaping
+- Verify database volume permissions if running on Linux
+
 ## Maintenance
 
 Remember to follow the graceful shutdown procedure in the main documentation when performing maintenance on your Docker-based provider. Never kill the containers without proper shutdown or you risk being slashed.

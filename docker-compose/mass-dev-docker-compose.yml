@@ -599,7 +599,7 @@ services:
       - dbeaver-data:/opt/cloudbeaver/workspace
 
   requester:
-    image: randao/requester:v0.4.2
+    image: randao/requester:v0.4.5
     environment:
       REQUEST_WALLET_JSON: ${REQUEST_WALLET_JSON}
 
