@@ -38,7 +38,8 @@ setInterval(() => {
 
 const docker = new Docker();
 // Constants for configuration
-const POLLING_INTERVAL_MS = 10000;
+const POLLING_INTERVAL_MS = 30000; //30 seconds
+const DATABASE_CHECK_TIME = 60000; //60 seconds
 const MINIMUM_ENTRIES = 1000;
 const DRYRUNTIMEOUT = 30000; // 30 seconds
 const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.1';
@@ -881,7 +882,7 @@ async function run(): Promise<void> {
             console.error("Error in checkAndFetchIfNeeded:", error);
         });
 
-    }, 10000);
+    }, DATABASE_CHECK_TIME);
 
     setInterval(async () => {
         await monitorDockerContainers();
