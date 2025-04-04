@@ -5,6 +5,7 @@ venv/
 env
 *wallet.json
 *wallet*.json
+mass-docker-compose.yml
 # Ignore distribution/build directories
 dist/
 build/
