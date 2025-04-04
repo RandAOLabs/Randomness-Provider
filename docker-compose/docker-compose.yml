@@ -31,7 +31,6 @@ services:
       ENVIRONMENT: local
       PATH_TO_WALLET: /app/wallet.json  # Path inside the container
       WALLET_JSON: ${WALLET_JSON}
-      PROVIDER_ID: ${PROVIDER_ID}
       DOCKER_NETWORK: backend  # Passing the network name
     networks:
       - backend
