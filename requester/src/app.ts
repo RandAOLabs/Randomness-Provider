@@ -30,7 +30,7 @@ async function getRandomClient(): Promise<RandomClient> {
     if (!randomClientInstance) {
         randomClientInstance = ((await RandomClient.defaultBuilder())
             .withAOConfig(AO_CONFIG))
-            .withProcessId("2ExUldxQ5NA_hnElSWYq0_lCBgeQQPxPhFbWDFihDEY")
+            // .withProcessId("2ExUldxQ5NA_hnElSWYq0_lCBgeQQPxPhFbWDFihDEY")
             .withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!))
             .build();
     }
