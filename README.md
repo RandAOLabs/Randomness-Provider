@@ -1,119 +1,235 @@
 # Node Provider Setup Guide
 
-This guide will walk you through getting your randomness provider set up and connected to the network so you can start contributing to the protocol and participating in decentralized randomness!
+This guide will help you set up your randomness provider node and start earning rewards. The guide is split into a simple quickstart section followed by more detailed technical information.
 
 ## Table of Contents
-1. [Introduction](#introduction)
-2. [Hardware Requirements](#hardware-requirements)
-3. [Randomness Generation](#randomness-generation)
-4. [Deployment Options](#deployment-options)
-   - [Option 1: AWS Deployment with Terraform](#option-1-aws-deployment-with-terraform)
-   - [Option 2: Docker Compose Deployment](#option-2-docker-compose-deployment)
-5. [Graceful Shutdown Policy](#graceful-shutdown-policy)
-6. [Staking](#staking)
+1. [Quickstart Guide](#quickstart-guide)
+2. [How It Works](#how-it-works)
+3. [Hardware Requirements](#hardware-requirements)
+4. [Detailed Setup Instructions](#detailed-setup-instructions)
+5. [Maintenance](#maintenance)
+6. [Graceful Shutdown](#graceful-shutdown)
+7. [Troubleshooting](#troubleshooting)
+8. [Frequently Asked Questions](#frequently-asked-questions)
 
 ---
 
-## Introduction
-As a node provider, you are responsible for ensuring 100% uptime. In the event of necessary downtime, it is mandatory to run the graceful shutdown process to prevent being slashed.
+## Quickstart Guide
+
+Setting up your randomness provider is easy! Just follow these simple steps:
+
+### Step 1: Install Docker
+Install Docker and Docker Compose by following the [official Docker Compose installation guide](https://docs.docker.com/compose/install/) for your operating system.
+
+### Step 2: Set Up Your Environment
+1. Navigate to the Docker Compose directory
+2. Copy the example environment file:
+   ```
+   cp .env.example .env
+   ```
+3. Edit the `.env` file and add your wallet information
+
+### Step 3: Start Your Provider
+Run this command to start your provider:
+```
+docker-compose up -d
+```
+
+### Step 4: Stake Your Node
+1. Navigate to ar://randao
+2. Connect your wallet
+3. Follow the staking instructions to activate your provider
+
+That's it! Your node is now running and will start generating randomness for the network.
+
+**Need help?** Check the [Troubleshooting](#troubleshooting) section or [Frequently Asked Questions](#frequently-asked-questions) below.
+
+---
+
+## How It Works
 
 Your provider performs 3 main functions:
-1. It updates the amount of available random it has stored on chain. Each random value requires significant computation to create, ensuring compliance with our commit-reveal time delay scheme.
-2. It detects when someone has requested random from you and provides the input number to your time delay function. This is not the final random number.
-3. It detects when all parties have submitted their input numbers and then provides the output number along with the proof of history checkpoints to the chain for verification. This output is the random number that will be used on chain.
+1. It creates and stores random values that others can request
+2. It responds when someone requests a random value
+3. It submits final verified random values to the blockchain
 
-These steps are executed as quickly as possible to get the complete random value on chain promptly. Faster providers will be incentivized for their speed, while slower ones will be penalized. If a provider is too slow for step 2, it will be slashed a small amount. If a provider is too slow for step 3, they will be considered malicious and slashed heavily.
-
-If you need to take your provider offline, you must run the graceful shutdown process, which will execute step 1 once with a value of -1, indicating you are no longer offering random. After that, your node will finish all pending requests in steps 2 and 3 before shutting down.
+The better your provider performs these functions, the more rewards you'll receive. Providers with faster response times earn more!
 
 ---
 
 ## Hardware Requirements
-To run a node, the following hardware specifications are required:
 
-- **Minimum Hardware Requirements:**
-  - 4 GB memory
-  - 2 CPU cores
-- **Note:** These requirements will increase over time to meet network demands.
+To run a node, you'll need:
+- At least 4 GB memory
+- At least 2 CPU cores
+- Reliable internet connection
 
----
-
-## Randomness Generation
-
-Our system now uses cryptographic time lock puzzles instead of Verifiable Delay Functions (VDF) for randomness generation. The provider "mines" for these puzzles, which creates a provable time delay between commitment and revelation of random values. This approach enhances security while maintaining verifiability of the randomness generated.
-
-The time lock puzzles require significant initial computation but become less resource-intensive once you've mined and stored a sufficient number of them for sale. This makes the provider more efficient over time as your puzzle inventory grows.
+**Note:** These requirements may increase over time as the network grows.
 
 ---
 
-## What the Hardware Runs
-The hardware you set up runs 3 key services:
-1. A provider service
-2. A database for the provider
-3. Temporary jobs to generate random values and store them in the database
+## Detailed Setup Instructions
 
-Both of our deployment options are designed to run these services efficiently.
+### Prerequisites
+- A machine meeting the minimum hardware requirements
+- Docker and Docker Compose installed
+- Reliable internet connection
+- Ability to ensure 100% uptime or follow the [Graceful Shutdown](#graceful-shutdown) procedures
+
+### Setup Steps
+
+1. **Configure Environment Variables**
+   Navigate to the Docker Compose directory and create your environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+   Then edit the `.env` file and fill in all required variables:
+
+   **Required Variables:**
+   - `provider_id`: Your unique provider identifier
+   - `local_db_user`: Database username
+   - `local_db_password`: Database password
+   - `local_wallet_json`: Your wallet information (either directly pasted or as a file path)
+
+   **Optional Variables (with defaults):**
+   - `db_name`: Database name (default: orchestrator_db)
+   - `secrets_prefix`: Prefix for secrets (default: /orchestrator)
+
+2. **Deploy Your Provider**
+   From the Docker Compose directory, run:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Verify Deployment**
+   Check the status of your containers:
+   ```bash
+   docker-compose ps
+   ```
+
+   View logs to ensure everything is running correctly:
+   ```bash
+   docker-compose logs -f
+   ```
+
+4. **Staking**
+   After successfully setting up your node:
+   1. Show logs from the node setup to Ethan for verification
+   2. Upon confirmation, Ethan will provide your provider address with the necessary funds
+   3. Navigate to ar://randao to stake your funds and configure your provider information
+
+By completing this process, you will fully activate your node and ensure it is ready for network participation.
 
 ---
 
-## Deployment Options
+## Maintenance
 
-We now fully support and recommend two deployment methods, depending on your infrastructure preferences and capabilities:
+To update your provider when new versions are released:
 
-### Option 1: AWS Deployment with Terraform
-This method leverages AWS services for optimal performance, scalability, and cost-effectiveness.
+```bash
+docker-compose pull
+docker-compose down
+docker-compose up -d
+```
 
-**Advantages:**
-- Most cost-effective solution at scale
-- Guaranteed 100% uptime with AWS reliability
-- Optimized for performance with managed services
-- Automatic scaling based on demand
-
-While this option may be more technically complex to set up initially, it provides the best long-term solution for dedicated providers.
-
-[Terraform setup guide](./terraform/README.md)
-
-### Option 2: Docker Compose Deployment
-This method allows you to run the provider on your own hardware using Docker containers.
-
-**Advantages:**
-- Easier to set up if you have spare hardware available
-- More straightforward for users familiar with Docker
-- Direct control over your infrastructure
-- Simpler technical requirements
-
-This option is less resource-intensive once you've mined enough time lock puzzles and stored them for sale.
-
-[Docker Compose setup guide](./docker-compose/README.md)
-
-Both methods are fully supported and recommended as long as you can ensure 100% uptime or follow the graceful shutdown procedure during maintenance periods.
+Remember to follow the graceful shutdown procedure when performing maintenance to avoid penalties.
 
 ---
 
-## Graceful Shutdown Policy
-To avoid being slashed, it is critical to run the graceful shutdown in the event of planned downtime. Failing to do so may result in penalties.
+## Graceful Shutdown
 
-To run a graceful shutdown:
+If you need to perform maintenance or temporarily shut down your provider, it's critical to follow these steps to avoid being penalized:
+
 1. Go to ar://randao
 2. Navigate to your node
 3. Select the "SHUT DOWN" button and sign the transaction
-
-This will tell your provider to stop serving random values.
+4. Wait for your provider to complete all pending requests (check logs)
+5. Once all pending requests are complete, you can safely shut down your provider
 
 After maintenance is complete and your provider is back online:
 1. Click the "START UP" button
 2. This will signal your provider to resume serving random values
 
+**Warning:** Failing to follow the graceful shutdown procedure may result in penalties to your stake!
+
 ---
 
-## Staking
+## Troubleshooting
 
-After successfully setting up your node, you will need to provide proof that the gateway is operational:
+If you encounter issues with your provider, here are some common problems and solutions:
 
-1. Show logs from the node setup to Ethan for verification.
-2. Upon confirmation, Ethan will provide your provider address with the necessary funds.
-3. Navigate to ar://randao to stake your funds and configure your provider information.
+### "Provider Not Found" Error
+- Ensure your provider is properly staked at ar://randao
+- Wait for blockchain confirmation (it may take some time for your stake to be recognized)
+- Check your wallet configuration in the `.env` file
 
-By completing this process, you will fully activate your node and ensure it is ready for network participation.
+### Network Connectivity Issues
+- If your provider can't connect to the network, check your internet connection
+- Check your firewall settings to ensure the required ports are open
+- Wait for network conditions to improve before attempting to restart
+
+### Slow or Unresponsive Provider
+- Check system resources to ensure your host has sufficient CPU and memory
+- Monitor the logs for any error messages or warnings:
+  ```bash
+  docker-compose logs -f
+  ```
+- If the puzzle generator is struggling, consider scaling up your hardware
+
+### General Issues
+- Try restarting the containers:
+  ```bash
+  docker-compose restart
+  ```
+- For more persistent issues, you can try a full reset:
+  ```bash
+  docker-compose down
+  docker-compose up -d
+  ```
+- Ensure your container has the latest version:
+  ```bash
+  docker-compose pull
+  docker-compose down
+  docker-compose up -d
+  ```
+
+### Database Issues
+- If the database container fails to start, check logs for specific errors:
+  ```bash
+  docker-compose logs db
+  ```
+- Ensure the database password in your `.env` file doesn't contain special characters that need escaping
+- Verify database volume permissions if running on Linux
+
+---
+
+## Frequently Asked Questions
+
+### What is a randomness provider?
+A randomness provider generates verifiable random numbers that are used in various decentralized applications on the blockchain. These random numbers are crucial for fair and transparent operation of many applications.
+
+### How do I earn rewards?
+You earn rewards by providing random values to users who request them. The rewards depend on your provider's performance, reliability, and response time.
+
+### What happens if my provider goes offline?
+If your provider goes offline without following the graceful shutdown procedure, you may be penalized (slashed). Always follow the [Graceful Shutdown](#graceful-shutdown) procedure before taking your provider offline.
+
+### How much can I earn as a provider?
+Earnings depend on network demand, your provider's performance, and the amount you have staked. Better-performing providers with higher stakes tend to earn more.
+
+### Can I run multiple providers?
+Yes, you can run multiple providers. Each provider needs its own unique wallet and must be staked separately.
+
+### What is the recommended hardware for optimal performance?
+While the minimum requirements are 4GB RAM and 2 CPU cores, we recommend at least 8GB RAM and 4 CPU cores for optimal performance.
+
+### Do I need technical knowledge to run a provider?
+Basic familiarity with command line operations and Docker is helpful, but the quickstart guide is designed to be accessible even to those with limited technical experience.
+
+### How often do I need to update my provider?
+Updates will be announced in the community channels. We recommend keeping your provider updated to the latest version for optimal performance and security.
+
+---
 
 Thank you for contributing to the network's success!

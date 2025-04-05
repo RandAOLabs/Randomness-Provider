@@ -14,7 +14,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "src/db_config.ts",
+    "src/db_tools.ts",
     "src/clear_all_output_requests.ts",
     "src/reset_db.mjs",
     "src/clear_outputs.tzs"

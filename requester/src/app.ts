@@ -1,15 +1,8 @@
 import {
-    ProviderStakingClient,
-    getRandomClientAutoConfiguration,
-    IRandomClient,
     RandomClient,
-    RandomClientConfig,
-    StakingClient,
-    ProviderProfileClient,
-    RandomClientConfigBuilder,
 } from "ao-process-clients";
 
-const RETRY_DELAY_MS = 30000; // 30 seconds
+const RETRY_DELAY_MS = 5000; // 5 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;

@@ -1,5 +1,5 @@
-import { Client, QueryResult } from 'pg';
-import { dbConfig } from './db_config';
+import { Client } from 'pg';
+import { dbConfig } from './db_tools';
 
 interface TableRow {
     tablename: string;
