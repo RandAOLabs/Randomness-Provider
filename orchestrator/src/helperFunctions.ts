@@ -1,17 +1,19 @@
-import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, Logger, LogLevel, RandomClient } from "ao-process-clients";
+import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, Logger, LogLevel, RandomClient, RequestList } from "ao-process-clients";
 import { Client } from "pg";
-import { COMPLETION_RETENTION_PERIOD_MS, DRYRUNTIMEOUT } from "./app";
+import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
+import { getMoreRandom } from "./containerManagment";
 
 
 let randomClientInstance: RandomClient | null = null;
 let lastInitTime: number = 0;
 const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
-
-const AO_CONFIG = {
-    MU_URL: "https://ur-mu.randao.net",
-    CU_URL: "https://ur-cu.randao.net",
-    GATEWAY_URL: "https://arweave.net",
-};
+let current_onchain_random = - 10
+let ongoingRequest = false;
+// const AO_CONFIG = {
+//     MU_URL: "https://ur-mu.randao.net",
+//     CU_URL: "https://ur-cu.randao.net",
+//     GATEWAY_URL: "https://arweave.net",
+// };
 // Optional: Auto-reinitialize on a timer
 setInterval(() => {
     randomClientInstance = null;
@@ -21,8 +23,8 @@ export async function getRandomClient(): Promise<RandomClient> {
     const currentTime = Date.now();
     Logger.setLogLevel(LogLevel.DEBUG)
     if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
-        randomClientInstance = ((await RandomClient.defaultBuilder())
-            .withAOConfig(AO_CONFIG))
+        randomClientInstance = ((await RandomClient.defaultBuilder()))
+        // .withAOConfig(AO_CONFIG)
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .build();
         lastInitTime = currentTime;
@@ -239,70 +241,131 @@ export async function cleanupFulfilledEntries(
     console.log(`${parentLogId} Step 4 completed.`);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse | false> {
-
-    let openRequests: GetOpenRandomRequestsResponse;
-
-    // Create a function to fetch open requests with a timeout
-    const fetchOpenRequests = async (): Promise<GetOpenRandomRequestsResponse> => {
-        try {
-            const response = await (await getRandomClient()).getOpenRandomRequests(PROVIDER_ID);
-            return response;
-        } catch (error) {
-            console.error(`${parentLogId} Error fetching requests: ${error}`);
-            return { /* Return a default or empty response here */ } as GetOpenRandomRequestsResponse;
-        }
+export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
+    const defaultResponse: GetOpenRandomRequestsResponse = {
+        providerId: PROVIDER_ID,
+        activeChallengeRequests: { request_ids: [] },
+        activeOutputRequests: { request_ids: [] }
     };
-
     try {
-        openRequests = await Promise.race([
-            fetchOpenRequests().catch(err => {
-                throw new Error(`${parentLogId} Fetch Error: ${err}`);
-            }),
-            new Promise<GetOpenRandomRequestsResponse>((_, reject) =>
-                setTimeout(() => reject(new Error('Timeout')), DRYRUNTIMEOUT)
-            )
-        ]);
-    } catch (error) {
-        console.log(`${parentLogId} Step 1: ${error}`);
-        //randclient.setDryRunAsMessage(true);
-        console.log("Removed this as its spamming")
-        console.log("Switching dryrun off");
-        openRequests = await fetchOpenRequests(); // Retry request
-    }
+        const response = await (await getRandomClient()).getAllProviderActivity();
+        const provider = response.find(p => p.provider_id === PROVIDER_ID);
 
-    if(openRequests.toString().includes("not found")){
-    return false
+        if (!provider) {
+            console.warn(`${parentLogId} Warning: Provider with ID ${PROVIDER_ID} not found.`);
+            return defaultResponse;
+        }
+
+        // Attempt to parse fields if they exist, otherwise default to empty arrays
+        let parsedChallengeRequests: RequestList = { request_ids: [] };
+        let parsedOutputRequests: RequestList = { request_ids: [] };
+
+        try {
+            if (provider.active_challenge_requests) {
+                //@ts-ignore
+                parsedChallengeRequests = JSON.parse(provider.active_challenge_requests);
+            }
+        } catch (err) {
+            console.warn(`${parentLogId} Warning: Failed to parse active_challenge_requests:`, err);
+        }
+
+        try {
+            if (provider.active_output_requests) {
+                //@ts-ignore
+                parsedOutputRequests = JSON.parse(provider.active_output_requests);
+            }
+        } catch (err) {
+            console.warn(`${parentLogId} Warning: Failed to parse active_output_requests:`, err);
+        }
+
+        // Only update current_onchain_random if successful
+        current_onchain_random = provider.random_balance;
+
+        const result: GetOpenRandomRequestsResponse = {
+            providerId: provider.provider_id,
+            activeChallengeRequests: parsedChallengeRequests,
+            activeOutputRequests: parsedOutputRequests,
+        };
+
+        console.log(`${parentLogId} Step 1: Open Requests: ${JSON.stringify(result)}`);
+        console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${result.activeChallengeRequests.request_ids.length}`);
+        console.log(`${parentLogId} Step 1: Open Output Requests count: ${result.activeOutputRequests.request_ids.length}`);
+
+        return result;
+
+    } catch (error) {
+        console.error(`${parentLogId} Error fetching provider requests: ${error}`);
+        return defaultResponse;
     }
-    console.log(`${parentLogId} Step 1: Open Requests: ${JSON.stringify(openRequests)}`);
-    console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${openRequests.activeChallengeRequests.request_ids.length}`);
-    console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${openRequests.activeOutputRequests.request_ids.length}`);
-    return openRequests;
+}
+
+
+// Function to check and fetch database entries as needed
+export async function checkAndFetchIfNeeded(client: Client) {
+    try {
+        // Query current count of usable DB entries
+        const res = await client.query(
+            'SELECT COUNT(*) AS count FROM time_lock_puzzles WHERE request_id IS NULL'
+        );
+        const currentCount = parseInt(res.rows[0].count, 10);
+        console.log("Total usable DB entries: " + currentCount);
+
+        switch (current_onchain_random) {
+            case -1:
+                console.log("Value is -1");
+                console.log("Provider has been shut down by USER...");
+                console.log("Go to the provider dashboard to turn back on");
+                //TODO prepare for shutdown
+                //TODO the async causes it to ovewrite itself
+                break;
+            case -2:
+                console.log("Value is -2");
+                console.log("Provider has been shut down by PROCESS...");
+                console.log("This is due to One of the following: ");
+                console.log("Failing to provide random fast enough (Provider is not responding to random requests and considered unhealthy NO SLASH)");
+                console.log("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)" );
+                console.log("Failing to provide the correct proof for your original random (Provider was detected as malicious for tampering with the random LARGE SLASH)");
+                console.log("Go to the provider dashboard to turn back on");
+                break;
+            case -3:
+                console.log("Value is -3");
+                console.log("Provider has been shut down by PROCESS...");
+                console.log("This was likely done as a test or to get the maintainers attention. Contact team if you see this and are not sure why");
+                console.log("Go to the provider dashboard to turn back on");
+                break;
+            case -10:
+                console.log("Value is -10");
+                console.log("Provider has been turned on and is starting up OR is not staked yet");
+                console.log("Go to the provider dashboard to Stke if you have not yet OR wait fro provider to finish turning on if you have staked already");
+                break;
+            default:
+                console.log("Value is not -1, -2, or -3");
+                console.log("Provider is up and working");
+                console.log("Onchain Value is "+ current_onchain_random)
+                console.log("Local Value is "+ currentCount)
+                if (Math.abs(current_onchain_random - currentCount) > UNCHAIN_VS_OFFCHAIN_MAX_DIF) {
+                    console.log(`Updating available random values from ${current_onchain_random} to ${currentCount}`);
+                    updateAvailableValuesAsync(currentCount);
+                  }
+        }
+        if (ongoingRequest) return; // Prevent redundant operations
+
+        // Check if more entries are needed
+        if (currentCount >= MINIMUM_ENTRIES) return;
+        getMoreRandom(currentCount)
+        ongoingRequest = true;
+
+    } catch (error) {
+        console.error('Error during check and fetch:', error);
+    } finally {
+        ongoingRequest = false; // Allow future operations
+    }
 }
 
 export function updateAvailableValuesAsync(currentCount: number) {
     return (async () => {
         try {
-            const randomClient = await getRandomClient();
-            await randomClient.updateProviderAvailableValues(currentCount);
+            await (await getRandomClient()).updateProviderAvailableValues(currentCount);
             console.log(`Updated provider values to ${currentCount}`);
         } catch (error) {
             console.error("Failed to update provider values:", error);
@@ -310,9 +373,11 @@ export function updateAvailableValuesAsync(currentCount: number) {
     })();
 }
 export async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<GetProviderAvailableValuesResponse> {
-    try {
-        const randomClient = await getRandomClient();
-        return await randomClient.getProviderAvailableValues(PROVIDER_ID);
+    try { //TODO remove and clean this up
+        return {
+            providerId: PROVIDER_ID,
+            availibleRandomValues:current_onchain_random
+        }
     } catch (error) {
         console.error(`Error fetching available random values: ${error}`);
         return {} as GetProviderAvailableValuesResponse;
@@ -392,5 +457,16 @@ const {
         console.log(`${parentLogId} Proof posted for request ID: ${requestId}`);
     } catch (error) {
         console.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
+    }
+}
+
+export async function shutdown() {
+    try {
+        const randomClient = await getRandomClient();
+        let message = await randomClient.updateProviderAvailableValues(0);
+        console.log(message);
+        console.log(`Updated provider values to 0`);
+    } catch (error) {
+        console.error("Failed to update provider values:", error);
     }
 }

@@ -1,8 +1,9 @@
 import {
     RandomClient,
 } from "ao-process-clients";
+import { TransferToProviders } from "./extra";
 
-const RETRY_DELAY_MS = 5000; // 5 seconds
+const RETRY_DELAY_MS = 10000; // 10 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -10,25 +11,25 @@ const CHANCE_TO_CALL_RANDOM = 1;
 let cachedProviders: string[] = [];
 let lastProviderRefresh = 0;
 
-const AO_CONFIG = {
-    MU_URL: "https://ur-mu.randao.net",
-    Cu_URL: "https://ur-cu.randao.net",
-    GATEWAY_URL: "https://arweave.net",
-};
+// const AO_CONFIG = {
+//     MU_URL: "https://ur-mu.randao.net",
+//     CU_URL: "https://ur-cu.randao.net",
+//     GATEWAY_URL: "https://arweave.net",
+// };
 
 let randomClientInstance: RandomClient | null = null;
 
 async function getRandomClient(): Promise<RandomClient> {
     
     if (!randomClientInstance) {
-        randomClientInstance = ((await RandomClient.defaultBuilder())
-            .withAOConfig(AO_CONFIG))
-            // .withProcessId("2ExUldxQ5NA_hnElSWYq0_lCBgeQQPxPhFbWDFihDEY")
+        randomClientInstance = ((await RandomClient.defaultBuilder()))
+        //.withAOConfig(AO_CONFIG)
             .withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!))
             .build();
     }
     return randomClientInstance;
 }
+
 
 
 
@@ -122,7 +123,8 @@ async function main() {
                 const callbackId = `callback-${Date.now()}`;
                 const { providers, count } = await getRandomProviders(randclient);
                 console.log(`Selected ${count} providers:`, providers);
-                await randclient.createRequest(providers, count, callbackId);
+                //await randclient.createRequest(providers, count, callbackId);
+                await TransferToProviders(providers, callbackId)
                 //await randclient.createRequest(["X1tqliRkKnClhVQ4aIeyuOaPTzr5PfnxqAoSdpTzZy8"], 1, "123");
                 totalRandomCalled++;
                 console.log("Random request initiated. Awaiting request ID in open requests...");
