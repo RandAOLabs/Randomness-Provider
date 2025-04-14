@@ -16,7 +16,7 @@ npx ts-node src/clear_outputs.ts
 
 
 # Export version as an environment variable
-export VERSION=v0.4.55  # You can change this value to any version you want
+export VERSION=v0.4.60  # You can change this value to any version you want
 
 # Build the Docker image with the version tag
 docker build -t randao/orchestrator:latest -t randao/orchestrator:$VERSION .

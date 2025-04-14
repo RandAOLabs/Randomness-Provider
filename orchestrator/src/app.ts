@@ -1,10 +1,9 @@
-import { Client } from 'pg';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
-import { connectWithRetry, dbConfig, setupDatabase } from './db_tools.js';
+import { connectWithRetry, setupDatabase } from './db_tools.js';
 import Arweave from 'arweave';
-import { cleanupFulfilledEntries, getProviderRequests, getRandomClient, processChallengeRequests, processOutputRequests } from './helperFunctions.js';
-import { checkAndFetchIfNeeded, monitorDockerContainers } from './containerManagment.js';
+import { checkAndFetchIfNeeded, cleanupFulfilledEntries, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown } from './helperFunctions.js';
+import {monitorDockerContainers } from './containerManagment.js';
 
 
 
@@ -16,7 +15,7 @@ export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.1';
 
 
 export const DOCKER_MONITORING_TIME= 30000;
-export const POLLING_INTERVAL_MS = 30000; //30 seconds
+export const POLLING_INTERVAL_MS = 500; //0.5 seconds
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
 export const MINIMUM_ENTRIES = 1000;
 export const DRYRUNTIMEOUT = 30000; // 30 seconds
@@ -50,20 +49,6 @@ function resetStepTracking() {
     };
 }
 
-
-async function shutdown() {
-    try {
-        const randomClient = await getRandomClient();
-        let message = await randomClient.updateProviderAvailableValues(0);
-        console.log(message);
-        console.log(`Updated provider values to 0`);
-    } catch (error) {
-        console.error("Failed to update provider values:", error);
-    }
-}
-
-
-
 function getLogId(): string {
     const randomId = Math.floor(10000 + Math.random() * 90000); // 5-digit random number
     const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false }); // HH:MM:SS format
@@ -95,10 +80,6 @@ async function polling(client: any) {
         const s1 = Date.now();
         console.log(`${logId} Step 1 started.`);
         const openRequests = await getProviderRequests(PROVIDER_ID, logId);
-        if(openRequests == false){
-            console.log("Provider is set up and ready. Please stake to join network at https://providers_randao.ar.io")
-            return
-        }
         stepTracking.step1 = { completed: true, timeTaken: Date.now() - s1 };
         console.log(`${logId} Step 1: Open requests fetched. Time taken: ${stepTracking.step1.timeTaken}ms`);
 
@@ -123,6 +104,7 @@ async function polling(client: any) {
                 console.log(`${logId} Step 4 started.`);
                 //TODO enable this again later
                 await cleanupFulfilledEntries(client, openRequests, logId);
+                await checkAndFetchIfNeeded(client)
                 stepTracking.step4 = { completed: true, timeTaken: Date.now() - s4 };
                 console.log(`${logId} Step 4 completed. Time taken: ${stepTracking.step4.timeTaken}ms`);
             })(),
@@ -150,16 +132,16 @@ async function run(): Promise<void> {
         PROVIDER_ID = address
     });
 
-    setInterval(async () => {
-        const res = await client.query('SELECT COUNT(*) as count FROM time_lock_puzzles');
-        console.log(`Periodic log - Current database size: ${res.rows[0].count}`);
-        // Check and fetch entries for the database if needed
-        console.log("Step 0: Checking and fetching database entries if below threshold.");
-        checkAndFetchIfNeeded(client, PROVIDER_ID).catch((error) => {
-            console.error("Error in checkAndFetchIfNeeded:", error);
-        });
+    // setInterval(async () => {
+    //     const res = await client.query('SELECT COUNT(*) as count FROM time_lock_puzzles');
+    //     console.log(`Periodic log - Current database size: ${res.rows[0].count}`);
+    //     // Check and fetch entries for the database if needed
+    //     console.log("Step 0: Checking and fetching database entries if below threshold.");
+    //     checkAndFetchIfNeeded(client, PROVIDER_ID).catch((error) => {
+    //         console.error("Error in checkAndFetchIfNeeded:", error);
+    //     });
 
-    }, DATABASE_CHECK_TIME);
+    // }, DATABASE_CHECK_TIME);
 
     setInterval(async () => {
         await monitorDockerContainers();

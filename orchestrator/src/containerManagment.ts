@@ -1,16 +1,11 @@
 import { docker, DOCKER_NETWORK, ecs, ENVIRONMENT, MINIMUM_ENTRIES, TIME_PUZZLE_JOB_IMAGE, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
 import AWS from 'aws-sdk';
 import { dbConfig } from "./db_tools";
-import { getProviderAvailableRandomValues, updateAvailableValuesAsync } from "./helperFunctions";
-import { Client } from "pg";
-
 export interface NetworkConfig {
   subnets: string[];
   securityGroups: string[];
 }
 
-
-let ongoingRequest = false;
 let spotInterruptions = 0;
 // Global variables to track polling status
 let pulledDockerimage = false;
@@ -168,8 +163,6 @@ export async function getMoreRandom(currentCount: number) {
     const entriesNeeded = MINIMUM_ENTRIES - currentCount;
     console.log(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${entriesNeeded} more entries...`);
 
-    ongoingRequest = true;
-
     if (ongoingContainers.size > 0) {
         console.log("A puzzle-gen container is already running. Skipping new container launch.");
         return null;
@@ -261,62 +254,4 @@ export async function monitorDockerContainers(): Promise<void> {
 // Helper function to type guard Docker errors
 function isDockerError(error: unknown): error is { statusCode: number } {
     return typeof error === 'object' && error !== null && 'statusCode' in error && typeof (error as any).statusCode === 'number';
-}
-
-// Function to check and fetch database entries as needed
-export async function checkAndFetchIfNeeded(client: Client, PROVIDER_ID:string) {
-    try {
-        //Check if provider has been given a special signal
-        const on_chain_avalible_random = await getProviderAvailableRandomValues(PROVIDER_ID);
-        // Query current count of usable DB entries
-        const res = await client.query(
-            'SELECT COUNT(*) AS count FROM time_lock_puzzles WHERE request_id IS NULL'
-        );
-        const currentCount = parseInt(res.rows[0].count, 10);
-        console.log("Total usable DB entries: " + currentCount);
-
-        switch (on_chain_avalible_random.availibleRandomValues) {
-            case -1:
-                console.log("Value is -1");
-                console.log("Provider has been shut down by USER...");
-                console.log("Go to the provider dashboard to turn back on");
-                //TODO prepare for shutdown
-                //TODO the async causes it to ovewrite itself
-                break;
-            case -2:
-                console.log("Value is -2");
-                console.log("Provider has been shut down by PROCESS...");
-                console.log("This is due to One of the following: ");
-                console.log("Failing to provide random fast enough (Provider is not responding to random requests and considered unhealthy NO SLASH)");
-                console.log("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)" );
-                console.log("Failing to provide the correct proof for your original random (Provider was detected as malicious for tampering with the random LARGE SLASH)");
-                console.log("Go to the provider dashboard to turn back on");
-                break;
-            case -3:
-                console.log("Value is -3");
-                console.log("Provider has been shut down by PROCESS...");
-                console.log("This was likely done as a test or to get the maintainers attention. Contact team if you see this and are not sure why");
-                console.log("Go to the provider dashboard to turn back on");
-                break;
-            default:
-                console.log("Value is not -1, -2, or -3");
-                console.log("Provider is up and working");
-                console.log("Onchain Value is "+ on_chain_avalible_random.availibleRandomValues)
-                console.log("Local Value is "+ currentCount)
-                if (Math.abs(on_chain_avalible_random.availibleRandomValues - currentCount) > UNCHAIN_VS_OFFCHAIN_MAX_DIF) {
-                    console.log(`Updating available random values from ${on_chain_avalible_random.availibleRandomValues} to ${currentCount}`);
-                    updateAvailableValuesAsync(currentCount);
-                  }
-        }
-        if (ongoingRequest) return; // Prevent redundant operations
-
-        // Check if more entries are needed
-        if (currentCount >= MINIMUM_ENTRIES) return;
-        getMoreRandom(currentCount)
-
-    } catch (error) {
-        console.error('Error during check and fetch:', error);
-    } finally {
-        ongoingRequest = false; // Allow future operations
-    }
 }
