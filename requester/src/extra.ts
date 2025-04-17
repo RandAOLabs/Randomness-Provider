@@ -1,12 +1,16 @@
 import { connect, createDataItemSigner } from "@permaweb/aoconnect";
 
 const { spawn, message, result } = connect({
-  MU_URL: "https://ur-mu.randao.net",
-  CU_URL: "https://ur-cu.randao.net",
-  MODE: "legacy"
+        MU_URL: "https://ur-mu.randao.net",
+        CU_URL: "https://ur-cu.randao.net",
+        // MU_URL: "https://mu.ao-testnet.xyz",
+        // CU_URL: "https://cu.ao-testnet.xyz",
+        GATEWAY_URL: "https://arweave.net",
+        MODE: "legacy"
+
 });
-const TOKEN_PROCESS = "kUnKIPp7XS4pBsy1qy7j3S-JJ0ChZ4utbZ-IPxhw_W0"
-const RAND_PROCESS = "UujLOtCfyo3uoKfuozS7cQfTe11BdvWR3Slb65zrR7k"
+const TOKEN_PROCESS = "rPpsRk9Rm8_SJ1JF8m9_zjTalkv9Soaa_5U0tYUloeY"
+const RAND_PROCESS = "ZBSQD_GeGUdQAiixxKy9Ag1rgJvJ_yFUGExwjW6mA7E"
 export async function fetchMessageResult(
     messageID: string,
     processID: string

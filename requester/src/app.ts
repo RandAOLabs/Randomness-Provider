@@ -14,6 +14,8 @@ let lastProviderRefresh = 0;
 // const AO_CONFIG = {
 //     MU_URL: "https://ur-mu.randao.net",
 //     CU_URL: "https://ur-cu.randao.net",
+//     // MU_URL: "https://mu.ao-testnet.xyz",
+//     // CU_URL: "https://cu.ao-testnet.xyz",
 //     GATEWAY_URL: "https://arweave.net",
 // };
 

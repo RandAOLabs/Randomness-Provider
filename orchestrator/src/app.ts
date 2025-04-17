@@ -15,7 +15,7 @@ export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.1';
 
 
 export const DOCKER_MONITORING_TIME= 30000;
-export const POLLING_INTERVAL_MS = 500; //0.5 seconds
+export const POLLING_INTERVAL_MS = 5000; //5 seconds
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
 export const MINIMUM_ENTRIES = 1000;
 export const DRYRUNTIMEOUT = 30000; // 30 seconds
