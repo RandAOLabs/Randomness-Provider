@@ -12,6 +12,8 @@ let ongoingRequest = false;
 // const AO_CONFIG = {
 //     MU_URL: "https://ur-mu.randao.net",
 //     CU_URL: "https://ur-cu.randao.net",
+//     // MU_URL: "https://mu.ao-testnet.xyz",
+//     // CU_URL: "https://cu.ao-testnet.xyz",
 //     GATEWAY_URL: "https://arweave.net",
 // };
 // Optional: Auto-reinitialize on a timer
@@ -24,7 +26,7 @@ export async function getRandomClient(): Promise<RandomClient> {
     Logger.setLogLevel(LogLevel.DEBUG)
     if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
         randomClientInstance = ((await RandomClient.defaultBuilder()))
-        // .withAOConfig(AO_CONFIG)
+        //.withAOConfig(AO_CONFIG)
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .build();
         lastInitTime = currentTime;

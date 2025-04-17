@@ -7,7 +7,7 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "ao-process-clients": "^6.0.16",
+    "ao-process-clients": "^6.0.18",
     "ao-vrf": "file:",
     "arweave": "^1.15.5",
     "aws-sdk": "^2.1692.0",
