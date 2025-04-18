@@ -59,12 +59,25 @@ pytest --cov=src
 
 
 
-# Build the Docker image with the version tag
-docker build -t randao/puzzle-gen:latest -t randao/puzzle-gen:v0.1.1 .
+# Set version as an environment variable
+export VERSION=v0.1.5  # Change this value as needed
 
-# Log in to Docker
+# Initial build and tagging for local testing
+docker build -t randao/puzzle-gen:latest -t randao/puzzle-gen:$VERSION .
+
+# Log in to Docker Hub (optional, remove if already logged in)
 docker login
 
-# Push the image with the version tag
+# Push local builds
 docker push randao/puzzle-gen:latest
-docker push randao/puzzle-gen:v0.1.1
+docker push randao/puzzle-gen:$VERSION
+
+# Set up and use Docker buildx builder (if not already created)
+docker buildx create --name arm-builder --use || docker buildx use arm-builder
+docker buildx inspect --bootstrap
+
+# Multi-platform build for ARM64 and AMD64, and push to Docker Hub
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t randao/puzzle-gen:latest \
+  -t randao/puzzle-gen:$VERSION \
+  --push .
