@@ -9,7 +9,6 @@ import {monitorDockerContainers } from './containerManagment.js';
 
 export const docker = new Docker();
 export const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
-export const ENVIRONMENT = process.env.ENVIRONMENT || 'local';
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.5';
 
