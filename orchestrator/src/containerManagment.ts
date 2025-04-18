@@ -1,4 +1,4 @@
-import { docker, DOCKER_NETWORK, ecs, ENVIRONMENT, MINIMUM_ENTRIES, TIME_PUZZLE_JOB_IMAGE, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
+import { docker, DOCKER_NETWORK, ecs, MINIMUM_ENTRIES, TIME_PUZZLE_JOB_IMAGE, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
 import AWS from 'aws-sdk';
 import { dbConfig } from "./db_tools";
 export interface NetworkConfig {
@@ -9,6 +9,7 @@ export interface NetworkConfig {
 let spotInterruptions = 0;
 // Global variables to track polling status
 let pulledDockerimage = false;
+let pullingImagePromise: Promise<void> | null = null; // Add at the top-level scope (module-global)
 // Cache for network configuration
 let cachedNetworkConfig: NetworkConfig | null = null;
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
@@ -82,58 +83,49 @@ export async function launchVDFTask(
 
 
 export async function triggerTimePuzzleJobPod(randomCount: number): Promise<string | null> {
-    if (ENVIRONMENT === 'cloud') {
-        try {
-            console.log("Cloud environment detected. Launching ECS task.");
+        const containerName = `puzzle-gen_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 
-            // Get or refresh network configuration
-            if (!cachedNetworkConfig) {
-                console.log("Fetching network configuration...");
-                cachedNetworkConfig = await getNetworkConfig(ecs);
-                console.log("Network config:", cachedNetworkConfig);
-            }
-
-            const taskArn = await launchVDFTask(ecs, cachedNetworkConfig, randomCount);
-            if (taskArn) {
-                ongoingContainers.add(taskArn);
-                console.log(`ECS task started successfully: ${taskArn}`);
-                return taskArn;
-            }
-            return null;
-        } catch (error: any) {
-            if (error?.code === 'SpotCapacityNotAvailableException') {
-                spotInterruptions++;
-                console.log(`Spot instance reclaimed by AWS. Total interruptions so far: ${spotInterruptions}`);
-            } else {
-                console.error("Error launching ECS task:", error);
-                // Reset network config cache on error to force refresh on next attempt
-                cachedNetworkConfig = null;
-            }
+        if (ongoingContainers.size > 0) {
+            console.log("A puzzle-gen container is already running. Skipping new container launch.");
             return null;
         }
-    } else {
-        const containerName = `puzzle-gen_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-        console.log(`Starting Docker container with name: ${containerName}`);
-        try {
-            if (!pulledDockerimage) {
-                console.log(`Pulling image: ${TIME_PUZZLE_JOB_IMAGE}`);
-                await new Promise((resolve, reject) => {
-                    docker.pull(TIME_PUZZLE_JOB_IMAGE, (err: any, stream: NodeJS.ReadableStream) => {
-                        if (err) {
-                            return reject(err);
+
+        // Ensure only one pull operation at a time
+        if (!pulledDockerimage) {
+            if (!pullingImagePromise) {
+                pullingImagePromise = new Promise<void>((resolve, reject) => {
+                    console.log(`Pulling image: ${TIME_PUZZLE_JOB_IMAGE}`);
+                    docker.pull(TIME_PUZZLE_JOB_IMAGE, (err: Error | null, stream: NodeJS.ReadableStream | undefined) => {
+                        if (err || !stream) {
+                            pullingImagePromise = null; // reset on error
+                            return reject(err || new Error("Docker stream undefined"));
                         }
-                        docker.modem.followProgress(stream, (doneErr) => {
-                            if (doneErr) reject(doneErr);
-                            else resolve(true);
+                        docker.modem.followProgress(stream, (doneErr: Error | null) => {
+                            if (doneErr) {
+                                pullingImagePromise = null; // reset on error
+                                reject(doneErr);
+                            } else {
+                                pulledDockerimage = true; // Mark as pulled after success
+                                resolve();
+                            }
                         });
                     });
                 });
-                pulledDockerimage = true;
             }
+            try {
+                await pullingImagePromise;
+            } catch (error) {
+                console.error(`Failed to pull Docker image:`, error);
+                pullingImagePromise = null;
+                return null;
+            }
+        }
+
+        console.log(`Starting Docker container with name: ${containerName}`);
+        try {
             const container = await docker.createContainer({
                 Image: TIME_PUZZLE_JOB_IMAGE,
                 Cmd: ['sh', '-c', `python3 main.py ${randomCount}`],
-
                 Env: [
                     `DATABASE_TYPE=postgresql`,
                     `DATABASE_HOST=${dbConfig.host}`,
@@ -156,7 +148,6 @@ export async function triggerTimePuzzleJobPod(randomCount: number): Promise<stri
             console.error(`Error starting Docker container ${containerName}:`, error);
             return null;
         }
-    }
 }
 
 export async function getMoreRandom(currentCount: number) {
@@ -215,10 +206,6 @@ async function monitorECSTasks(): Promise<void> {
 // Function to wait for Docker containers to complete and remove them from tracking
 export async function monitorDockerContainers(): Promise<void> {
     if (ongoingContainers.size === 0) return;
-    if (ENVIRONMENT === 'cloud') {
-        await monitorECSTasks();
-    } else {
-
         for (const containerId of ongoingContainers) {
             try {
                 const container = docker.getContainer(containerId);
@@ -248,7 +235,6 @@ export async function monitorDockerContainers(): Promise<void> {
                 ongoingContainers.delete(containerId); // Remove from tracking if there's an error (e.g., container not found)
             }
         }
-    }
 }
 
 // Helper function to type guard Docker errors

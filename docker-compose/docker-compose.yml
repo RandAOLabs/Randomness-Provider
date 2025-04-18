@@ -18,7 +18,7 @@ services:
       retries: 5
 
   orchestrator:
-    image: randao/orchestrator:v0.4.67
+    image: randao/orchestrator:v0.4.68
     depends_on:
       postgres:
         condition: service_healthy
@@ -28,7 +28,6 @@ services:
       DB_USER: ${DB_USER:-myuser}
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
-      ENVIRONMENT: local
       PATH_TO_WALLET: /app/wallet.json  # Path inside the container
       WALLET_JSON: ${WALLET_JSON}
       DOCKER_NETWORK: backend  # Passing the network name
