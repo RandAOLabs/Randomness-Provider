@@ -1,21 +1,15 @@
-import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, Logger, LogLevel, RandomClient, RequestList } from "ao-process-clients";
+import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RequestList } from "ao-process-clients";
 import { Client } from "pg";
 import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
 import { getMoreRandom } from "./containerManagment";
-
+import logger, { LogLevel } from "./logger";
 
 let randomClientInstance: RandomClient | null = null;
 let lastInitTime: number = 0;
 const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
 let current_onchain_random = - 10
 let ongoingRequest = false;
-// const AO_CONFIG = {
-//     MU_URL: "https://ur-mu.randao.net",
-//     CU_URL: "https://ur-cu.randao.net",
-//     // MU_URL: "https://mu.ao-testnet.xyz",
-//     // CU_URL: "https://cu.ao-testnet.xyz",
-//     GATEWAY_URL: "https://arweave.net",
-// };
+
 // Optional: Auto-reinitialize on a timer
 setInterval(() => {
     randomClientInstance = null;
@@ -23,24 +17,18 @@ setInterval(() => {
 
 export async function getRandomClient(): Promise<RandomClient> {
     const currentTime = Date.now();
-    Logger.setLogLevel(LogLevel.DEBUG)
+    
     if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
+        logger.debug("Initializing RandomClient");
         randomClientInstance = ((await RandomClient.defaultBuilder()))
-        //.withAOConfig(AO_CONFIG)
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .build();
         lastInitTime = currentTime;
+        logger.debug("RandomClient initialized");
     }
     
     return randomClientInstance;
 }
-
-
-
-
-
-
-
 
 // Step 2: Process Challenge Requests (Database selection & assigning is atomic)
 export async function processChallengeRequests(
@@ -48,20 +36,20 @@ export async function processChallengeRequests(
     activeChallengeRequests: { request_ids: string[] } | undefined,
     parentLogId: string
 ): Promise<void> {
-    console.log(`${parentLogId} Step 2: Processing challenge requests.`);
+    logger.info(`${parentLogId} Step 2: Processing challenge requests.`);
 
     if (!activeChallengeRequests || activeChallengeRequests.request_ids.length === 0) {
-        console.log(`${parentLogId} No Challenge Requests to process.`);
+        logger.info(`${parentLogId} No Challenge Requests to process.`);
         return;
     }
 
     const requestIds = activeChallengeRequests.request_ids;
-    console.log(`${parentLogId} Processing up to ${requestIds.length} requests.`);
+    logger.info(`${parentLogId} Processing up to ${requestIds.length} requests.`);
 
     try {
         await client.query('BEGIN'); // Start transaction
     
-        console.log(`${parentLogId} Fetching existing request mappings.`);
+        logger.debug(`${parentLogId} Fetching existing request mappings.`);
         
         // Fetch already assigned request_id -> dbId mappings
         const existingMappingsRes = await client.query(
@@ -72,16 +60,16 @@ export async function processChallengeRequests(
         );
     
         const existingRequestIds = new Set(existingMappingsRes.rows.map(row => row.request_id));
-        console.log(`${parentLogId} Found ${existingRequestIds.size} already mapped requests.`);
+        logger.debug(`${parentLogId} Found ${existingRequestIds.size} already mapped requests.`);
     
         // Find only the unmapped requests (requestIds not in existingRequestIds)
         const unmappedRequestIds = requestIds.filter(requestId => !existingRequestIds.has(requestId));
-        console.log(`${parentLogId} Unmapped requests: ${unmappedRequestIds.length}`);
+        logger.debug(`${parentLogId} Unmapped requests: ${unmappedRequestIds.length}`);
     
         let mappedEntries: { requestId: string, dbId: number }[] = [];
     
         if (unmappedRequestIds.length > 0) {
-            console.log(`${parentLogId} Fetching available DB entries.`);
+            logger.debug(`${parentLogId} Fetching available DB entries.`);
             const dbRes = await client.query(
                 `SELECT id FROM time_lock_puzzles 
                  WHERE request_id IS NULL 
@@ -92,7 +80,7 @@ export async function processChallengeRequests(
             );
     
             const availableDbEntries = dbRes.rows.map(row => row.id);
-            console.log(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
+            logger.debug(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
     
             if (availableDbEntries.length > 0) {
                 const numMappings = Math.min(unmappedRequestIds.length, availableDbEntries.length);
@@ -105,10 +93,10 @@ export async function processChallengeRequests(
                         [unmappedRequestIds[i], availableDbEntries[i]]
                     );
                     mappedEntries.push({ requestId: unmappedRequestIds[i], dbId: availableDbEntries[i] });
-                    console.log(`${parentLogId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
+                    logger.debug(`${parentLogId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
                 }
             } else {
-                console.log(`${parentLogId} No available DB entries for unmapped requests.`);
+                logger.warn(`${parentLogId} No available DB entries for unmapped requests.`);
             }
         }
     
@@ -116,62 +104,63 @@ export async function processChallengeRequests(
         const allRequestIds = [...existingRequestIds, ...mappedEntries.map(entry => entry.requestId)];
     
         if (allRequestIds.length === 0) {
-            console.log(`${parentLogId} No requests to process. Committing transaction.`);
+            logger.info(`${parentLogId} No requests to process. Committing transaction.`);
             await client.query('COMMIT');
             return;
         }
     
         await client.query('COMMIT'); // Commit all updates at once
-        console.log(`${parentLogId} Committed all changes. Now fulfilling challenges.`);
+        logger.info(`${parentLogId} Committed all changes. Now fulfilling challenges.`);
     
         // Call fulfillRandomChallenge for all request IDs
         await Promise.all(
             allRequestIds.map(requestId => 
                 fulfillRandomChallenge(client, requestId, parentLogId)
-                    .catch(error => console.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
+                    .catch(error => logger.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
             )
         );
     
-        console.log(`${parentLogId} All challenges fulfilled`);
+        logger.info(`${parentLogId} All challenges fulfilled`);
     } catch (error:any) {
-        console.error(`${parentLogId} Error in processChallengeRequests:`, error);
+        logger.error(`${parentLogId} Error in processChallengeRequests:`, error);
         await client.query('ROLLBACK'); // Rollback on failure
     
-        console.error(`SQL State: ${error.code}, Message: ${error.message}`);
+        logger.error(`SQL State: ${error.code}, Message: ${error.message}`);
     } 
 }
-// Step 3: Process Output Requests (unchanged but with logging)
+
+// Step 3: Process Output Requests
 export async function processOutputRequests(
     client: Client,
     activeOutputRequests: { request_ids: string[] } | undefined,
     parentLogId: string
 ): Promise<void> {
-    console.log(`${parentLogId} Step 3: Processing output requests.`);
+    logger.info(`${parentLogId} Step 3: Processing output requests.`);
 
     if (!activeOutputRequests || activeOutputRequests.request_ids.length === 0) {
-        console.log(`${parentLogId} No Output Requests to process.`);
+        logger.info(`${parentLogId} No Output Requests to process.`);
         return;
     }
 
     const outputPromises = activeOutputRequests.request_ids.map(async (requestId) => {
-        console.log(`${parentLogId} Processing output request ID: ${requestId}`);
+        logger.debug(`${parentLogId} Processing output request ID: ${requestId}`);
 
         // Run fulfillRandomOutput asynchronously (do not await)
         fulfillRandomOutput(client, requestId, parentLogId)
-            .catch(error => console.error(`${parentLogId} Error fulfilling output:`, error));
+            .catch(error => logger.error(`${parentLogId} Error fulfilling output:`, error));
     });
 
     await Promise.all(outputPromises);
-    console.log(`${parentLogId} Step 3 completed.`);
+    logger.info(`${parentLogId} Step 3 completed.`);
 }
 
-// Step 4: Remove fulfilled entries no longer in use (unchanged but with logging)
+// Step 4: Remove fulfilled entries no longer in use
 export async function cleanupFulfilledEntries(
     client: Client,
     openRequests: any,
     parentLogId: string
 ): Promise<void> {
-    console.log(`${parentLogId} Step 4: Checking for fulfilled entries no longer in use.`);
+    logger.info(`${parentLogId} Step 4: Checking for fulfilled entries no longer in use.`);
 
     const now = new Date();
     const cutoffTime = new Date(now.getTime() - COMPLETION_RETENTION_PERIOD_MS);
@@ -214,10 +203,10 @@ export async function cleanupFulfilledEntries(
                 SET detected_completed = NOW()
                 WHERE id = ANY($1)
             `, [markAsCompleted]);
-            console.log(`${parentLogId} Marked ${markAsCompleted.length} entries as completed.`);
+            logger.debug(`${parentLogId} Marked ${markAsCompleted.length} entries as completed.`);
         }
 
-        // Delete old completed entries //TODO make sure its cleaning up BOTH tables
+        // Delete old completed entries 
         if (markForDeletion.length > 0) {
             await client.query(`
                 DELETE FROM rsa_keys
@@ -231,16 +220,16 @@ export async function cleanupFulfilledEntries(
                 WHERE id = ANY($1);
             `, [markForDeletion]);
         
-            console.log(`${parentLogId} Deleted ${markForDeletion.length} old completed entries and corresponding RSA keys.`);
+            logger.info(`${parentLogId} Deleted ${markForDeletion.length} old completed entries and corresponding RSA keys.`);
         }
 
         await client.query('COMMIT');
     } catch (error) {
-        console.error(`${parentLogId} Error in cleanupFulfilledEntries:`, error);
+        logger.error(`${parentLogId} Error in cleanupFulfilledEntries:`, error);
         await client.query('ROLLBACK');
     }
 
-    console.log(`${parentLogId} Step 4 completed.`);
+    logger.info(`${parentLogId} Step 4 completed.`);
 }
 
 export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
@@ -254,7 +243,7 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         const provider = response.find(p => p.provider_id === PROVIDER_ID);
 
         if (!provider) {
-            console.warn(`${parentLogId} Warning: Provider with ID ${PROVIDER_ID} not found.`);
+            logger.warn(`${parentLogId} Warning: Provider with ID ${PROVIDER_ID} not found.`);
             return defaultResponse;
         }
 
@@ -268,7 +257,7 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
                 parsedChallengeRequests = JSON.parse(provider.active_challenge_requests);
             }
         } catch (err) {
-            console.warn(`${parentLogId} Warning: Failed to parse active_challenge_requests:`, err);
+            logger.warn(`${parentLogId} Warning: Failed to parse active_challenge_requests:`, err);
         }
 
         try {
@@ -277,7 +266,7 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
                 parsedOutputRequests = JSON.parse(provider.active_output_requests);
             }
         } catch (err) {
-            console.warn(`${parentLogId} Warning: Failed to parse active_output_requests:`, err);
+            logger.warn(`${parentLogId} Warning: Failed to parse active_output_requests:`, err);
         }
 
         // Only update current_onchain_random if successful
@@ -289,18 +278,17 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
             activeOutputRequests: parsedOutputRequests,
         };
 
-        console.log(`${parentLogId} Step 1: Open Requests: ${JSON.stringify(result)}`);
-        console.log(`${parentLogId} Step 1: Open Challenge Requests count: ${result.activeChallengeRequests.request_ids.length}`);
-        console.log(`${parentLogId} Step 1: Open Output Requests count: ${result.activeOutputRequests.request_ids.length}`);
+        logger.verbose(`${parentLogId} Step 1: Open Requests: ${JSON.stringify(result)}`);
+        logger.info(`${parentLogId} Step 1: Open Challenge Requests count: ${result.activeChallengeRequests.request_ids.length}`);
+        logger.info(`${parentLogId} Step 1: Open Output Requests count: ${result.activeOutputRequests.request_ids.length}`);
 
         return result;
 
     } catch (error) {
-        console.error(`${parentLogId} Error fetching provider requests: ${error}`);
+        logger.error(`${parentLogId} Error fetching provider requests: ${error}`);
         return defaultResponse;
     }
 }
-
 
 // Function to check and fetch database entries as needed
 export async function checkAndFetchIfNeeded(client: Client) {
@@ -310,57 +298,55 @@ export async function checkAndFetchIfNeeded(client: Client) {
             'SELECT COUNT(*) AS count FROM time_lock_puzzles WHERE request_id IS NULL'
         );
         const currentCount = parseInt(res.rows[0].count, 10);
-        console.log("Total usable DB entries: " + currentCount);
+        logger.info(`Total usable DB entries: ${currentCount}`);
 
         switch (current_onchain_random) {
             case -1:
-                console.log("Value is -1");
-                console.log("Provider has been shut down by USER...");
-                console.log("Go to the provider dashboard to turn back on");
-                //TODO prepare for shutdown
-                //TODO the async causes it to ovewrite itself
+                logger.warn("Value is -1");
+                logger.warn("Provider has been shut down by USER...");
+                logger.warn("Go to the provider dashboard to turn back on");
                 break;
             case -2:
-                console.log("Value is -2");
-                console.log("Provider has been shut down by PROCESS...");
-                console.log("This is due to One of the following: ");
-                console.log("Failing to provide random fast enough (Provider is not responding to random requests and considered unhealthy NO SLASH)");
-                console.log("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)" );
-                console.log("Failing to provide the correct proof for your original random (Provider was detected as malicious for tampering with the random LARGE SLASH)");
-                console.log("Go to the provider dashboard to turn back on");
+                logger.error("Value is -2");
+                logger.error("Provider has been shut down by PROCESS...");
+                logger.error("This is due to One of the following: ");
+                logger.error("Failing to provide random fast enough (Provider is not responding to random requests and considered unhealthy NO SLASH)");
+                logger.error("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)" );
+                logger.error("Failing to provide the correct proof for your original random (Provider was detected as malicious for tampering with the random LARGE SLASH)");
+                logger.error("Go to the provider dashboard to turn back on");
                 break;
             case -3:
-                console.log("Value is -3");
-                console.log("Provider has been shut down by PROCESS...");
-                console.log("This was likely done as a test or to get the maintainers attention. Contact team if you see this and are not sure why");
-                console.log("Go to the provider dashboard to turn back on");
+                logger.warn("Value is -3");
+                logger.warn("Provider has been shut down by PROCESS...");
+                logger.warn("This was likely done as a test or to get the maintainers attention. Contact team if you see this and are not sure why");
+                logger.warn("Go to the provider dashboard to turn back on");
                 break;
             case -10:
-                console.log("Value is -10");
-                console.log("Provider has been turned on and is starting up OR is not staked yet");
-                console.log("Go to the provider dashboard to Stke if you have not yet OR wait fro provider to finish turning on if you have staked already");
+                logger.info("Value is -10");
+                logger.info("Provider has been turned on and is starting up OR is not staked yet");
+                logger.info("Go to the provider dashboard to Stake if you have not yet OR wait for provider to finish turning on if you have staked already");
                 break;
             default:
-                console.log("Value is not -1, -2, or -3");
-                console.log("Provider is up and working");
-                console.log("Onchain Value is "+ current_onchain_random)
-                console.log("Local Value is "+ currentCount)
+                logger.debug("Provider is up and working");
+                logger.debug(`Onchain Value is ${current_onchain_random}`);
+                logger.debug(`Local Value is ${currentCount}`);
                 if (Math.abs(current_onchain_random - currentCount) > UNCHAIN_VS_OFFCHAIN_MAX_DIF) {
-                    console.log(`Updating available random values from ${current_onchain_random} to ${currentCount}`);
+                    logger.info(`Updating available random values from ${current_onchain_random} to ${currentCount}`);
                     updateAvailableValuesAsync(currentCount);
-                  }else{
-                    console.log(`Not updating onchain values to avoid uneeded onchain messages. When differeence is over ${UNCHAIN_VS_OFFCHAIN_MAX_DIF} an update will happen`)
-                  }
+                } else {
+                    logger.debug(`Not updating onchain values to avoid unneeded onchain messages. When difference is over ${UNCHAIN_VS_OFFCHAIN_MAX_DIF} an update will happen`);
+                }
         }
         if (ongoingRequest) return; // Prevent redundant operations
 
         // Check if more entries are needed
         if (currentCount >= MINIMUM_ENTRIES) return;
-        getMoreRandom(currentCount)
+        logger.info(`Less than ${MINIMUM_ENTRIES} entries found. Fetching more entries...`);
+        getMoreRandom(currentCount);
         ongoingRequest = true;
 
     } catch (error) {
-        console.error('Error during check and fetch:', error);
+        logger.error('Error during check and fetch:', error);
     } finally {
         ongoingRequest = false; // Allow future operations
     }
@@ -370,20 +356,21 @@ export function updateAvailableValuesAsync(currentCount: number) {
     return (async () => {
         try {
             await (await getRandomClient()).updateProviderAvailableValues(currentCount);
-            console.log(`Updated provider values to ${currentCount}`);
+            logger.info(`Updated provider values to ${currentCount}`);
         } catch (error) {
-            console.error("Failed to update provider values:", error);
+            logger.error("Failed to update provider values:", error);
         }
     })();
 }
+
 export async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<GetProviderAvailableValuesResponse> {
-    try { //TODO remove and clean this up
+    try {
         return {
             providerId: PROVIDER_ID,
-            availibleRandomValues:current_onchain_random
-        }
+            availibleRandomValues: current_onchain_random
+        };
     } catch (error) {
-        console.error(`Error fetching available random values: ${error}`);
+        logger.error(`Error fetching available random values:`, error);
         return {} as GetProviderAvailableValuesResponse;
     }
 }
@@ -400,15 +387,15 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
         );
 
         if (!res.rowCount) {
-            console.error(`No entry found for Request ID: ${requestId}`);
+            logger.error(`No entry found for Request ID: ${requestId}`);
             return;
         }
 
         const { id: dbId, modulus, x: input } = res.rows[0];
 
-        console.log(`${parentLogId} Fetched entry details - Request ID: ${requestId}, DB ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
+        logger.debug(`${parentLogId} Fetched entry details - Request ID: ${requestId}, DB ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
 
-        console.log(`${parentLogId} Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
+        logger.info(`${parentLogId} Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
         await (await getRandomClient()).commit({
             requestId: requestId,
             puzzle: {
@@ -416,11 +403,12 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
                 modulus: modulus
             }
         });
-        console.log(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
+        logger.info(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
     } catch (error) {
-        console.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
+        logger.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
     }
 }
+
 // Function to post VDF output and proof
 async function fulfillRandomOutput(client: Client, requestId: string, parentLogId: string): Promise<void> {
     try {
@@ -438,39 +426,41 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
         );
         
         if (!res.rowCount) {
-            console.error(`No entry found for request ID: ${requestId}`);
+            logger.error(`No entry found for request ID: ${requestId}`);
             return;
         }
-       // Map the response to structured variables
-const { 
-    id: dbId, 
-    output,  // Mapping 'y' to 'output'
-    p: rsaP, 
-    q: rsaQ 
-} = res.rows[0];
-        console.log(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}, output: ${output}, rsaP: ${rsaP}, rsaQ ${rsaQ} `);
+        
+        // Map the response to structured variables
+        const { 
+            id: dbId, 
+            output,  // Mapping 'y' to 'output'
+            p: rsaP, 
+            q: rsaQ 
+        } = res.rows[0];
+        
+        logger.debug(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}, output: ${output}, rsaP: ${rsaP}, rsaQ ${rsaQ} `);
 
-        console.log(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
+        logger.info(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
         await (await getRandomClient()).reveal({
             requestId: requestId,
             rsa_key: {
                 p: rsaP,
                 q: rsaQ
             }
-        })
-        console.log(`${parentLogId} Proof posted for request ID: ${requestId}`);
+        });
+        logger.info(`${parentLogId} Proof posted for request ID: ${requestId}`);
     } catch (error) {
-        console.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
+        logger.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
     }
 }
 
 export async function shutdown() {
     try {
         const randomClient = await getRandomClient();
-        let message = await randomClient.updateProviderAvailableValues(0);
-        console.log(message);
-        console.log(`Updated provider values to 0`);
+        const message = await randomClient.updateProviderAvailableValues(0);
+        logger.info(String(message)); // Convert message to string
+        logger.info(`Updated provider values to 0`);
     } catch (error) {
-        console.error("Failed to update provider values:", error);
+        logger.error("Failed to update provider values:", error);
     }
 }

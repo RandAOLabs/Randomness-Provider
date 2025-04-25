@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import { MAX_RETRIES, RETRY_DELAY_MS } from "./app";
+import logger from "./logger";
 
 export const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
@@ -11,19 +12,19 @@ export const dbConfig = {
 
 // Clear out the existing database
 export async function clearDatabase(client: Client): Promise<void> {
-    console.log("Clearing database...");
+    logger.info("Clearing database...");
 
     await client.query(`SET session_replication_role = 'replica';`);
 
     const { rows } = await client.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public';`);
     for (const row of rows) {
-        console.log(`Dropping table: ${row.tablename}`);
+        logger.debug(`Dropping table: ${row.tablename}`);
         await client.query(`DROP TABLE IF EXISTS "${row.tablename}" CASCADE;`);
     }
 
     await client.query(`SET session_replication_role = 'origin';`);
 
-    console.log("Database cleared.");
+    logger.info("Database cleared.");
 }
 
 export async function setupDatabase(client: Client): Promise<void> {
@@ -57,24 +58,26 @@ export async function setupDatabase(client: Client): Promise<void> {
         // Drop the old verifiable_delay_functions table if exists
         await client.query(`DROP TABLE IF EXISTS verifiable_delay_functions CASCADE;`);
 
-        console.log("✅ Database setup complete or already exists.");
+        logger.info("✅ Database setup complete or already exists.");
     } catch (error: any) {
-        console.error("❌ Legitimate issue encountered during database setup:", error.message);
+        logger.error("❌ Legitimate issue encountered during database setup:", error.message);
     }
 }
 
 // Retry logic for connecting to PostgreSQL
 export async function connectWithRetry(): Promise<Client> {
     const client = new Client(dbConfig);
+    
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             await client.connect();
-            console.log(`Connected to PostgreSQL database (Attempt ${attempt})`);
+            logger.info(`Connected to PostgreSQL database (Attempt ${attempt})`);
             return client;
         } catch (error) {
-            console.error(`Connection attempt ${attempt} failed, retrying in ${RETRY_DELAY_MS / 1000} seconds...`);
+            logger.warn(`Connection attempt ${attempt} failed, retrying in ${RETRY_DELAY_MS / 1000} seconds...`);
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
         }
     }
+    
     throw new Error("Failed to connect to PostgreSQL after multiple attempts");
 }
