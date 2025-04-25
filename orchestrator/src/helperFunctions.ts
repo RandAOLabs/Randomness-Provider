@@ -348,6 +348,8 @@ export async function checkAndFetchIfNeeded(client: Client) {
                 if (Math.abs(current_onchain_random - currentCount) > UNCHAIN_VS_OFFCHAIN_MAX_DIF) {
                     console.log(`Updating available random values from ${current_onchain_random} to ${currentCount}`);
                     updateAvailableValuesAsync(currentCount);
+                  }else{
+                    console.log(`Not updating onchain values to avoid uneeded onchain messages. When differeence is over ${UNCHAIN_VS_OFFCHAIN_MAX_DIF} an update will happen`)
                   }
         }
         if (ongoingRequest) return; // Prevent redundant operations
