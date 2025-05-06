@@ -10,7 +10,7 @@ const { spawn, message, result } = connect({
 
 });
 const TOKEN_PROCESS = "rPpsRk9Rm8_SJ1JF8m9_zjTalkv9Soaa_5U0tYUloeY"
-const RAND_PROCESS = "ZBSQD_GeGUdQAiixxKy9Ag1rgJvJ_yFUGExwjW6mA7E"
+const RAND_PROCESS = "8N08BvmC34q9Hxj-YS6eAOd_cSmYqGpezPPHUYWJBhg"
 export async function fetchMessageResult(
     messageID: string,
     processID: string

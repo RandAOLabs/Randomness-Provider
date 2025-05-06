@@ -10,7 +10,8 @@ npx ts-node src/clear_outputs.ts
 
 
 
-
+BUGS:
+Random deletes itself from the db the moment its been used and not requested. It does not check if it has succeefully used it for challenge AND output first, just checks if its mapped it. This should not be  an issue since it waits a day buttttt you know should be fixed with a better check
 
 
 
