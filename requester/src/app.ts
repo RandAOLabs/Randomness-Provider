@@ -3,7 +3,7 @@ import {
 } from "ao-process-clients";
 import { TransferToProviders } from "./extra";
 
-const RETRY_DELAY_MS = 3000; // 3 seconds
+const RETRY_DELAY_MS = 1000; // 1 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
