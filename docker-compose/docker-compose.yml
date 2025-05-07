@@ -29,7 +29,6 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
       PATH_TO_WALLET: /app/wallet.json  # Path inside the container
-      WALLET_JSON: ${WALLET_JSON}
       DOCKER_NETWORK: backend  # Passing the network name
     networks:
       - backend

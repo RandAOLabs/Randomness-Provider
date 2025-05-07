@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import Docker from 'dockerode';
 import AWS from 'aws-sdk';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
@@ -5,7 +6,10 @@ import Arweave from 'arweave';
 import { checkAndFetchIfNeeded, cleanupFulfilledEntries, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown } from './helperFunctions.js';
 import {monitorDockerContainers } from './containerManagment.js';
 
-
+if (!process.env.PATH_TO_WALLET) {
+    console.error("Env var PATH_TO_WALLET is not set!");
+    process.exit(1);
+}
 
 export const docker = new Docker();
 export const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
@@ -126,10 +130,8 @@ async function run(): Promise<void> {
     const client = await connectWithRetry();
     await setupDatabase(client);
 
-    arweave.wallets.jwkToAddress(JSON.parse(process.env.WALLET_JSON!)).then((address) => {
-        console.log(address);
-        PROVIDER_ID = address
-    });
+    const providerAddress = arweave.wallets.jwkToAddress(JSON.parse(await readFile(process.env.PATH_TO_WALLET!, 'utf8')));
+    console.log('Provider address:', providerAddress);
 
     // setInterval(async () => {
     //     const res = await client.query('SELECT COUNT(*) as count FROM time_lock_puzzles');
