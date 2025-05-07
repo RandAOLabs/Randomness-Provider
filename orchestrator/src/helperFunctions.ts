@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, Logger, LogLevel, RandomClient, RequestList } from "ao-process-clients";
 import { Client } from "pg";
 import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
@@ -27,7 +28,7 @@ export async function getRandomClient(): Promise<RandomClient> {
     if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
         randomClientInstance = ((await RandomClient.defaultBuilder()))
         //.withAOConfig(AO_CONFIG)
-            .withWallet(JSON.parse(process.env.WALLET_JSON!))
+            .withWallet(JSON.parse(await readFile(process.env.PATH_TO_WALLET!, 'utf8')))
             .build();
         lastInitTime = currentTime;
     }
