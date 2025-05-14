@@ -3,11 +3,22 @@ import { Client } from "pg";
 import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
 import { getMoreRandom } from "./containerManagment";
 import logger, { LogLevel } from "./logger";
+import { monitoring } from "./monitoring";
+import { setTimeout, setInterval } from 'timers';
 
 let randomClientInstance: RandomClient | null = null;
 let lastInitTime: number = 0;
 const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
 let current_onchain_random = - 10
+
+// Cooldown tracking for updateAvailableValuesAsync
+let lastUpdateTimestamp = 0;
+let isUpdateOnCooldown = false;
+let lastAutoUpdateTimestamp = 0;
+
+// Cooldown tracking for fulfillRandomChallenge and fulfillRandomOutput (per request ID)
+const challengeCooldowns = new Map<string, boolean>();
+const outputCooldowns = new Map<string, boolean>();
 let ongoingRequest = false;
 
 // Optional: Auto-reinitialize on a timer
@@ -22,6 +33,10 @@ export async function getRandomClient(): Promise<RandomClient> {
         logger.debug("Initializing RandomClient");
         randomClientInstance = ((await RandomClient.defaultBuilder()))
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
+            .withAOConfig({
+                CU_URL: "https://ur-pcu.randao.net",
+                MODE: "legacy"
+            })
             .build();
         lastInitTime = currentTime;
         logger.debug("RandomClient initialized");
@@ -352,13 +367,47 @@ export async function checkAndFetchIfNeeded(client: Client) {
     }
 }
 
-export function updateAvailableValuesAsync(currentCount: number) {
+export function updateAvailableValuesAsync(currentCount: number, forceUseOnchainValue: boolean = false) {
+    // If on cooldown, log and exit without updating
+    if (isUpdateOnCooldown) {
+        logger.debug(`Update skipped - on cooldown (${Math.floor((30000 - (Date.now() - lastUpdateTimestamp)) / 1000)}s remaining)`);
+        return;
+    }
+
     return (async () => {
         try {
-            await (await getRandomClient()).updateProviderAvailableValues(currentCount);
-            logger.info(`Updated provider values to ${currentCount}`);
+            // Set cooldown status
+            isUpdateOnCooldown = true;
+            lastUpdateTimestamp = Date.now();
+            
+            // Determine which value to use
+            const valueToUpdate = forceUseOnchainValue ? current_onchain_random : currentCount;
+            
+            // Get monitoring data including system specs and performance metrics
+            const monitoringData = await monitoring.getMonitoringData();
+            
+            // Send the count and monitoring data to the AO process
+            await (await getRandomClient()).updateProviderAvailableValues(valueToUpdate, monitoringData);
+            logger.info(`Updated provider values to ${valueToUpdate}${forceUseOnchainValue ? ' (using on-chain value)' : ''}`);
+            
+            // Track last auto-update time if this was a forced update
+            if (forceUseOnchainValue) {
+                lastAutoUpdateTimestamp = Date.now();
+            }
+            
+            // Set timeout to release cooldown after 30 seconds
+            setTimeout(() => {
+                isUpdateOnCooldown = false;
+                logger.debug('Update cooldown period ended');
+            }, 30000);
         } catch (error) {
             logger.error("Failed to update provider values:", error);
+            monitoring.incrementErrorCount();
+            // Release cooldown on error after 5 seconds to allow retry
+            setTimeout(() => {
+                isUpdateOnCooldown = false;
+                logger.debug('Update cooldown period ended (after error)');
+            }, 5000);
         }
     })();
 }
@@ -377,7 +426,16 @@ export async function getProviderAvailableRandomValues(PROVIDER_ID: string): Pro
 
 // Function to post VDF challenge (fetches dbId dynamically)
 async function fulfillRandomChallenge(client: Client, requestId: string, parentLogId: string): Promise<void> {
+    // Check if this request ID is on cooldown
+    if (challengeCooldowns.get(requestId)) {
+        logger.debug(`${parentLogId} Skipping challenge for request ID ${requestId} - on cooldown`);
+        return;
+    }
+    
     try {
+        // Mark this request ID as being processed to prevent duplicates
+        challengeCooldowns.set(requestId, true);
+        
         // Fetch the necessary details from the database using requestId
         const res = await client.query(
             `SELECT id, modulus, x 
@@ -404,14 +462,31 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
             }
         });
         logger.info(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
+        
+        // Set a timeout to release the cooldown after 1 second
+        setTimeout(() => {
+            challengeCooldowns.delete(requestId);
+            logger.debug(`${parentLogId} Challenge cooldown released for request ID: ${requestId}`);
+        }, 1000);
     } catch (error) {
         logger.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
+        // Release the cooldown immediately on error to allow retry
+        challengeCooldowns.delete(requestId);
     }
 }
 
 // Function to post VDF output and proof
 async function fulfillRandomOutput(client: Client, requestId: string, parentLogId: string): Promise<void> {
+    // Check if this request ID is on cooldown
+    if (outputCooldowns.get(requestId)) {
+        logger.debug(`${parentLogId} Skipping output for request ID ${requestId} - on cooldown`);
+        return;
+    }
+    
     try {
+        // Mark this request ID as being processed to prevent duplicates
+        outputCooldowns.set(requestId, true);
+        
         // Fetch the output and proof from the database using the requestId
         const res = await client.query(
             `SELECT 
@@ -449,18 +524,49 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
             }
         });
         logger.info(`${parentLogId} Proof posted for request ID: ${requestId}`);
+        
+        // Set a timeout to release the cooldown after 1 second
+        setTimeout(() => {
+            outputCooldowns.delete(requestId);
+            logger.debug(`${parentLogId} Output cooldown released for request ID: ${requestId}`);
+        }, 1000);
     } catch (error) {
         logger.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
+        // Release the cooldown immediately on error to allow retry
+        outputCooldowns.delete(requestId);
     }
+}
+
+// Initialize automatic update timer
+export function initializeAutoUpdateTimer() {
+    logger.info('Starting auto update timer for provider values');
+    lastAutoUpdateTimestamp = Date.now(); // Initialize timer start
+    
+    // Set up interval check that runs every minute
+    setInterval(() => {
+        const timeSinceLastUpdate = Date.now() - lastAutoUpdateTimestamp;
+        const tenMinutesInMs = 10 * 60 * 1000;
+        
+        if (timeSinceLastUpdate >= tenMinutesInMs) {
+            logger.info(`Auto-update triggered - ${Math.floor(timeSinceLastUpdate / 60000)} minutes since last update`);
+            updateAvailableValuesAsync(0, true); // Force use of on-chain value
+        }
+    }, 60000); // Check every minute
 }
 
 export async function shutdown() {
     try {
         const randomClient = await getRandomClient();
-        const message = await randomClient.updateProviderAvailableValues(0);
+        
+        // Get monitoring data for final update
+        const monitoringData = await monitoring.getMonitoringData();
+        
+        // Set provider available values to 0 and include final monitoring data
+        const message = await randomClient.updateProviderAvailableValues(0, monitoringData);
         logger.info(String(message)); // Convert message to string
         logger.info(`Updated provider values to 0`);
     } catch (error) {
         logger.error("Failed to update provider values:", error);
+        monitoring.incrementErrorCount();
     }
 }
