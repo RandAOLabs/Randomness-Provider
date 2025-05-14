@@ -3,7 +3,7 @@ import {
 } from "ao-process-clients";
 import { TransferToProviders } from "./extra";
 
-const RETRY_DELAY_MS = 1000; // 1 seconds
+const RETRY_DELAY_MS = 5000; // 1 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -17,6 +17,7 @@ let lastProviderRefresh = 0;
 //     // MU_URL: "https://mu.ao-testnet.xyz",
 //     // CU_URL: "https://cu.ao-testnet.xyz",
 //     GATEWAY_URL: "https://arweave.net",
+//     MODE: "legacy"
 // };
 
 let randomClientInstance: RandomClient | null = null;
@@ -25,7 +26,14 @@ async function getRandomClient(): Promise<RandomClient> {
     
     if (!randomClientInstance) {
         randomClientInstance = ((await RandomClient.defaultBuilder()))
-        //.withAOConfig(AO_CONFIG)
+            .withAOConfig({
+                MU_URL: "https://ur-mu.randao.net",
+                CU_URL: "https://ur-cu.randao.net",
+                // MU_URL: "https://mu.ao-testnet.xyz",
+                // CU_URL: "https://cu.ao-testnet.xyz",
+                GATEWAY_URL: "https://arweave.net",
+                MODE: "legacy"
+            })
             .withWallet(JSON.parse(process.env.REQUEST_WALLET_JSON!))
             .build();
     }
@@ -125,8 +133,8 @@ async function main() {
                 const callbackId = `callback-${Date.now()}`;
                 const { providers, count } = await getRandomProviders(randclient);
                 console.log(`Selected ${count} providers:`, providers);
-                //await randclient.createRequest(providers, count, callbackId);
-                await TransferToProviders(providers, callbackId)
+                await randclient.createRequest(providers, count, callbackId);
+                //await TransferToProviders(providers, callbackId)
                 //await randclient.createRequest(["X1tqliRkKnClhVQ4aIeyuOaPTzr5PfnxqAoSdpTzZy8"], 1, "123");
                 totalRandomCalled++;
                 console.log("Random request initiated. Awaiting request ID in open requests...");

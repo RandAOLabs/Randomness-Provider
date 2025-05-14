@@ -2,6 +2,7 @@ import { docker, DOCKER_NETWORK, ecs, MINIMUM_ENTRIES, TIME_PUZZLE_JOB_IMAGE, UN
 import AWS from 'aws-sdk';
 import { dbConfig } from "./db_tools";
 import logger from "./logger";
+import { monitoring } from "./monitoring";
 
 export interface NetworkConfig {
   subnets: string[];
@@ -169,37 +170,6 @@ export async function getMoreRandom(currentCount: number) {
   } catch (error) {
     logger.error('Error triggering job pod:', error);
   }
-}
-
-// Modified function to wait for ECS tasks to complete and remove them from tracking
-async function monitorECSTasks(): Promise<void> {
-  if (ongoingContainers.size === 0) return;
-
-  const describeTasksResult = await ecs.describeTasks({
-    cluster: process.env.ECS_CLUSTER_NAME || 'fargate-cluster',
-    tasks: Array.from(ongoingContainers)
-  }).promise();
-
-  describeTasksResult.tasks?.forEach(task => {
-    // Check capacity provider name to determine if it is running Fargate or Fargate Spot
-    const capacityProvider = task.capacityProviderName || 'Unknown';
-
-    logger.debug(`ECS task: ${task.taskArn}, Capacity Provider: ${capacityProvider}`);
-
-    if (task.lastStatus === 'STOPPED') {
-      logger.info(`ECS task stopped: ${task.taskArn}`);
-      if (task.stoppedReason) {
-        logger.info(`Task stopped reason: ${task.stoppedReason}`);
-        if (task.stoppedReason.includes('Host EC2 instance termination')) {
-          spotInterruptions++;
-          logger.warn(`Spot instance reclaimed by AWS. Total interruptions so far: ${spotInterruptions}`);
-        }
-      } else {
-        logger.info('Task stopped due to normal completion.');
-      }
-      ongoingContainers.delete(task.taskArn as string);
-    }
-  });
 }
 
 // Function to wait for Docker containers to complete and remove them from tracking
