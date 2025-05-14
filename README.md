@@ -42,16 +42,16 @@ docker-compose up -d
 
 That's it! Your node is now running and will start generating randomness for the network.
 
-**Need help?** Check the [Troubleshooting](#troubleshooting) section or [Frequently Asked Questions](#frequently-asked-questions) below.
+**Need help?** Check the [Frequently Asked Questions](#frequently-asked-questions) below.
 
 ---
 
 ## How It Works
 
 Your provider performs 3 main functions:
-1. It creates and stores random values that others can request
-2. It responds when someone requests a random value
-3. It submits final verified random values to the blockchain
+1. It creates and stores crytographic time lock puzzles to be used for random entropy generation
+2. It responds with the puzzle, then the answer when someone requests a random value
+3. It keeps the AO proccess informed on its random values and status so users can see if its availible or not
 
 The better your provider performs these functions, the more rewards you'll receive. Providers with faster response times earn more!
 
@@ -64,7 +64,6 @@ To run a node, you'll need:
 - At least 2 CPU cores
 - Reliable internet connection
 
-**Note:** These requirements may increase over time as the network grows.
 
 ---
 
@@ -155,54 +154,6 @@ After maintenance is complete and your provider is back online:
 
 ---
 
-## Troubleshooting
-
-If you encounter issues with your provider, here are some common problems and solutions:
-
-### "Provider Not Found" Error
-- Ensure your provider is properly staked at ar://randao
-- Wait for blockchain confirmation (it may take some time for your stake to be recognized)
-- Check your wallet configuration in the `.env` file
-
-### Network Connectivity Issues
-- If your provider can't connect to the network, check your internet connection
-- Check your firewall settings to ensure the required ports are open
-- Wait for network conditions to improve before attempting to restart
-
-### Slow or Unresponsive Provider
-- Check system resources to ensure your host has sufficient CPU and memory
-- Monitor the logs for any error messages or warnings:
-  ```bash
-  docker-compose logs -f
-  ```
-- If the puzzle generator is struggling, consider scaling up your hardware
-
-### General Issues
-- Try restarting the containers:
-  ```bash
-  docker-compose restart
-  ```
-- For more persistent issues, you can try a full reset:
-  ```bash
-  docker-compose down
-  docker-compose up -d
-  ```
-- Ensure your container has the latest version:
-  ```bash
-  docker-compose pull
-  docker-compose down
-  docker-compose up -d
-  ```
-
-### Database Issues
-- If the database container fails to start, check logs for specific errors:
-  ```bash
-  docker-compose logs db
-  ```
-- Ensure the database password in your `.env` file doesn't contain special characters that need escaping
-- Verify database volume permissions if running on Linux
-
----
 
 ## Frequently Asked Questions
 
@@ -359,3 +310,48 @@ Not much. If you can:
 - Run Docker
 
 ...you’re good to go. The setup is beginner-friendly and we offer full support via Discord.
+
+### I'm seeing a "Provider Not Found" error. What should I do?
+- Make sure your wallet is **staked** via the provider site: `ar://randao_providers`
+- Wait for the blockchain to confirm your stake (this may take a few minutes)
+- Check that your `.env` file contains the **correct wallet private key JSON**
+
+### My provider can't connect to the network. How can I fix this?
+- Check your **internet connection**
+- Make sure your **firewall isn't blocking** outgoing connections or Docker traffic
+- If the issue is due to network instability, **wait and try restarting later**
+
+### My provider is slow or unresponsive. What’s going on?
+- Confirm your host has **enough CPU and memory**
+- Check real-time logs:
+  ```bash
+  docker-compose logs -f
+  ```
+- If the puzzle generator is stalling, consider upgrading your hardware or verifying Docker is pulling the right image
+
+### I’m having general issues. How can I restart or reset?
+First, try a clean restart:
+```bash
+docker-compose restart
+```
+
+If problems persist, do a full reset:
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+To update to the latest version:
+```bash
+docker-compose pull
+docker-compose down
+docker-compose up -d
+```
+
+### My database container won’t start. How do I debug this?
+- Check logs:
+  ```bash
+  docker-compose logs db
+  ```
+- Make sure your `.env` has a database password that **doesn’t contain special characters** (some need escaping)
+- If using Linux, **check the volume permissions** on your database folder
