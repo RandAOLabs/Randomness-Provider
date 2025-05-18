@@ -1,7 +1,7 @@
 import {
     RandomClient,
 } from "ao-process-clients";
-import { TransferToProviders } from "./extra";
+//import { TransferToProviders } from "./extra";
 
 const RETRY_DELAY_MS = 5000; // 1 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes

@@ -1,5 +1,4 @@
 import Docker from 'dockerode';
-import AWS from 'aws-sdk';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
 import Arweave from 'arweave';
 import { checkAndFetchIfNeeded, cleanupFulfilledEntries, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown, initializeAutoUpdateTimer } from './helperFunctions.js';
@@ -8,14 +7,13 @@ import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
 export const docker = new Docker();
-export const ecs = new AWS.ECS({ region: process.env.AWS_REGION || 'us-east-1' });
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.5';
 
 export const DOCKER_MONITORING_TIME= 30000;
 export const POLLING_INTERVAL_MS = 0; //0 second
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
-export const MINIMUM_ENTRIES = 2500;
+export const MINIMUM_ENTRIES = 5000;
 export const DRYRUNTIMEOUT = 30000; // 30 seconds
 export const MAX_RETRIES = 10;
 export const RETRY_DELAY_MS = 10000;
