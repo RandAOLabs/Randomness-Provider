@@ -19,7 +19,15 @@ let lastAutoUpdateTimestamp = 0;
 // Cooldown tracking for fulfillRandomChallenge and fulfillRandomOutput (per request ID)
 const challengeCooldowns = new Map<string, boolean>();
 const outputCooldowns = new Map<string, boolean>();
-let ongoingRequest = false;
+// Track whether there's an ongoing random generation request
+let ongoingRandomGeneration = false;
+const MAX_RANDOM_PER_REQUEST = 100; // Maximum number of random values to generate in a single request
+
+// Function to reset the ongoingRandomGeneration flag
+export function resetOngoingRandomGeneration() {
+    ongoingRandomGeneration = false;
+    logger.info('Random generation flag reset. System ready for new random generation requests.');
+}
 
 // Optional: Auto-reinitialize on a timer
 setInterval(() => {
@@ -34,7 +42,7 @@ export async function getRandomClient(): Promise<RandomClient> {
         randomClientInstance = ((await RandomClient.defaultBuilder()))
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .withAOConfig({
-                CU_URL: "https://ur-pcu.randao.net",
+                CU_URL: "https://ur-cu.randao.net",
                 MODE: "legacy"
             })
             .build();
@@ -307,6 +315,12 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
 
 // Function to check and fetch database entries as needed
 export async function checkAndFetchIfNeeded(client: Client) {
+    // First check if a random generation is already in progress
+    if (ongoingRandomGeneration) {
+        logger.info('A random generation process is already running. Skipping new request.');
+        return;
+    }
+
     try {
         // Query current count of usable DB entries
         const res = await client.query(
@@ -352,20 +366,30 @@ export async function checkAndFetchIfNeeded(client: Client) {
                     logger.debug(`Not updating onchain values to avoid unneeded onchain messages. When difference is over ${UNCHAIN_VS_OFFCHAIN_MAX_DIF} an update will happen`);
                 }
         }
-        if (ongoingRequest) return; // Prevent redundant operations
 
         // Check if more entries are needed
         if (currentCount >= MINIMUM_ENTRIES) return;
-        logger.info(`Less than ${MINIMUM_ENTRIES} entries found. Fetching more entries...`);
-        getMoreRandom(currentCount);
-        ongoingRequest = true;
+        
+        // Set the flag to prevent concurrent random generation
+        ongoingRandomGeneration = true;
+        
+        // Calculate how many random values we need
+        const entriesNeeded = MINIMUM_ENTRIES - currentCount;
+        // Limit to MAX_RANDOM_PER_REQUEST
+        const randomToGenerate = Math.min(entriesNeeded, MAX_RANDOM_PER_REQUEST);
+        
+        logger.info(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${randomToGenerate} entries (out of ${entriesNeeded} needed)...`);
+        
+        // Start the random generation with the calculated amount
+        await getMoreRandom(currentCount, randomToGenerate);
 
     } catch (error) {
         logger.error('Error during check and fetch:', error);
-    } finally {
-        ongoingRequest = false; // Allow future operations
+        ongoingRandomGeneration = false; // Reset the flag on error
     }
+    // Note: we don't reset ongoingRandomGeneration here - it will be reset by the container monitoring
 }
+
 
 export function updateAvailableValuesAsync(currentCount: number, forceUseOnchainValue: boolean = false) {
     // If on cooldown, log and exit without updating
