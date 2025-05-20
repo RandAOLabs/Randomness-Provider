@@ -1,8 +1,7 @@
 import Docker from 'dockerode';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
 import Arweave from 'arweave';
-import { checkAndFetchIfNeeded, cleanupFulfilledEntries, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown, initializeAutoUpdateTimer } from './helperFunctions.js';
-import { monitorDockerContainers } from './containerManagment.js';
+import { checkAndFetchIfNeeded, cleanupFulfilledEntries, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
@@ -133,48 +132,18 @@ async function polling(client: any) {
 
 // Main function
 async function run(): Promise<void> {
-    // Initialize logger from environment variables
     logger.info("Orchestrator starting up");
     logger.debug("Environment variables loaded, initializing services");
-    
+
     const client = await connectWithRetry();
     await setupDatabase(client);
-    
-    // Get database entry count on startup
-    try {
-        const res = await client.query('SELECT COUNT(*) as count FROM time_lock_puzzles WHERE request_id IS NULL');
-        const entriesAvailable = parseInt(res.rows[0].count, 10);
-        logger.info(`Initial database entry count: ${entriesAvailable}`);
-    } catch (error) {
-        logger.error("Error getting initial database count:", error);
-    }
 
     arweave.wallets.jwkToAddress(JSON.parse(process.env.WALLET_JSON!)).then((address) => {
         logger.info(`Provider ID: ${address}`);
         PROVIDER_ID = address;
-        
-        // Initialize auto-update timer for provider values
-        initializeAutoUpdateTimer();
     });
 
-    // setInterval(async () => {
-    //     const res = await client.query('SELECT COUNT(*) as count FROM time_lock_puzzles');
-    //     logger.debug(`Periodic log - Current database size: ${res.rows[0].count}`);
-    //     // Check and fetch entries for the database if needed
-    //     logger.debug("Step 0: Checking and fetching database entries if below threshold.");
-    //     checkAndFetchIfNeeded(client, PROVIDER_ID).catch((error) => {
-    //         logger.error("Error in checkAndFetchIfNeeded:", error);
-    //     });
-    // }, DATABASE_CHECK_TIME);
-
-    setInterval(async () => {
-        await monitorDockerContainers();
-    }, DOCKER_MONITORING_TIME); // Cleanup every 30 seconds
-
-    setInterval(async () => {
-        await polling(client);
-    }, POLLING_INTERVAL_MS);
-
+    // Handle graceful shutdown before entering infinite loop
     process.on("SIGTERM", async () => {
         logger.info("SIGTERM received. Shutting down gracefully.");
         await client.end();
@@ -182,6 +151,20 @@ async function run(): Promise<void> {
         await Logger.close(); // Use the static close method on the Logger class
         process.exit(0);
     });
+//TODO SEE WHATS BETTER (This could possibly have a new tx queed up while the old one is in the works to keep it speeds but who knows)
+    // setInterval(async () => {
+    //     await polling(client);
+    // }, POLLING_INTERVAL_MS);
+
+    // Infinite polling loop
+    while (true) {
+        try {
+            await polling(client);
+        } catch (error) {
+            logger.error("Polling error:", error);
+        }
+    }
 }
+
 
 run().catch((err) => logger.error(`Error in main function: ${err}`));

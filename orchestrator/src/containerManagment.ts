@@ -81,14 +81,8 @@ export async function triggerTimePuzzleJobPod(randomCount: number): Promise<stri
   }
 }
 
-export async function getMoreRandom(currentCount: number, randomToGenerate: number) {
-  // If no specific amount provided, calculate based on minimum entries
-  if (!randomToGenerate) {
-    randomToGenerate = MINIMUM_ENTRIES - currentCount;
-  }
-  
+export async function getMoreRandom(randomToGenerate: number) {
   logger.info(`Attempting to fetch ${randomToGenerate} random entries...`);
-
   if (ongoingContainers.size > 0) {
     logger.info("A puzzle-gen container is already running. Skipping new container launch.");
     return null;
@@ -115,7 +109,10 @@ import { resetOngoingRandomGeneration } from './helperFunctions.js';
 
 // Function to wait for Docker containers to complete and remove them from tracking
 export async function monitorDockerContainers(): Promise<void> {
-  if (ongoingContainers.size === 0) return;
+  if (ongoingContainers.size === 0){
+    resetOngoingRandomGeneration();
+    return;
+  } 
 
   logger.verbose(`Monitoring ${ongoingContainers.size} Docker containers`);
   let containersRemoved = false;

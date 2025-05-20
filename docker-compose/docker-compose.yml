@@ -16,9 +16,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
 
   orchestrator:
-    image: randao/orchestrator:v1.0.1
+    image: randao/orchestrator:v1.0.2
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,6 +41,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
       - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
 
 networks:
   backend:

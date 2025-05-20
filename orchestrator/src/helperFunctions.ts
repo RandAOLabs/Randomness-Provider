@@ -1,7 +1,7 @@
 import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RequestList } from "ao-process-clients";
 import { Client } from "pg";
 import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
-import { getMoreRandom } from "./containerManagment";
+import { getMoreRandom, monitorDockerContainers } from "./containerManagment";
 import logger, { LogLevel } from "./logger";
 import { monitoring } from "./monitoring";
 import { setTimeout, setInterval } from 'timers';
@@ -12,16 +12,15 @@ const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
 let current_onchain_random = - 10
 
 // Cooldown tracking for updateAvailableValuesAsync
-let lastUpdateTimestamp = 0;
-let isUpdateOnCooldown = false;
-let lastAutoUpdateTimestamp = 0;
+let lastUpdatedOnChainTime = 0;
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 // Cooldown tracking for fulfillRandomChallenge and fulfillRandomOutput (per request ID)
 const challengeCooldowns = new Map<string, boolean>();
 const outputCooldowns = new Map<string, boolean>();
 // Track whether there's an ongoing random generation request
 let ongoingRandomGeneration = false;
-const MAX_RANDOM_PER_REQUEST = 100; // Maximum number of random values to generate in a single request
+const MAX_RANDOM_PER_REQUEST = 500; // Maximum number of random values to generate in a single request
 
 // Function to reset the ongoingRandomGeneration flag
 export function resetOngoingRandomGeneration() {
@@ -36,20 +35,21 @@ setInterval(() => {
 
 export async function getRandomClient(): Promise<RandomClient> {
     const currentTime = Date.now();
-    
+
     if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
         logger.debug("Initializing RandomClient");
         randomClientInstance = ((await RandomClient.defaultBuilder()))
             .withWallet(JSON.parse(process.env.WALLET_JSON!))
             .withAOConfig({
                 CU_URL: "https://ur-cu.randao.net",
+                MU_URL: "https://ur-mu.randao.net",
                 MODE: "legacy"
             })
             .build();
         lastInitTime = currentTime;
         logger.debug("RandomClient initialized");
     }
-    
+
     return randomClientInstance;
 }
 
@@ -71,9 +71,9 @@ export async function processChallengeRequests(
 
     try {
         await client.query('BEGIN'); // Start transaction
-    
+
         logger.debug(`${parentLogId} Fetching existing request mappings.`);
-        
+
         // Fetch already assigned request_id -> dbId mappings
         const existingMappingsRes = await client.query(
             `SELECT request_id FROM time_lock_puzzles 
@@ -81,16 +81,16 @@ export async function processChallengeRequests(
              FOR UPDATE SKIP LOCKED`,
             [requestIds]
         );
-    
+
         const existingRequestIds = new Set(existingMappingsRes.rows.map(row => row.request_id));
         logger.debug(`${parentLogId} Found ${existingRequestIds.size} already mapped requests.`);
-    
+
         // Find only the unmapped requests (requestIds not in existingRequestIds)
         const unmappedRequestIds = requestIds.filter(requestId => !existingRequestIds.has(requestId));
         logger.debug(`${parentLogId} Unmapped requests: ${unmappedRequestIds.length}`);
-    
+
         let mappedEntries: { requestId: string, dbId: number }[] = [];
-    
+
         if (unmappedRequestIds.length > 0) {
             logger.debug(`${parentLogId} Fetching available DB entries.`);
             const dbRes = await client.query(
@@ -101,13 +101,13 @@ export async function processChallengeRequests(
                  FOR UPDATE SKIP LOCKED`,
                 [unmappedRequestIds.length]
             );
-    
+
             const availableDbEntries = dbRes.rows.map(row => row.id);
             logger.debug(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
-    
+
             if (availableDbEntries.length > 0) {
                 const numMappings = Math.min(unmappedRequestIds.length, availableDbEntries.length);
-    
+
                 for (let i = 0; i < numMappings; i++) {
                     await client.query(
                         `UPDATE time_lock_puzzles 
@@ -122,34 +122,34 @@ export async function processChallengeRequests(
                 logger.warn(`${parentLogId} No available DB entries for unmapped requests.`);
             }
         }
-    
+
         // Collect all request IDs (previously mapped + newly mapped)
         const allRequestIds = [...existingRequestIds, ...mappedEntries.map(entry => entry.requestId)];
-    
+
         if (allRequestIds.length === 0) {
             logger.info(`${parentLogId} No requests to process. Committing transaction.`);
             await client.query('COMMIT');
             return;
         }
-    
+
         await client.query('COMMIT'); // Commit all updates at once
         logger.info(`${parentLogId} Committed all changes. Now fulfilling challenges.`);
-    
+
         // Call fulfillRandomChallenge for all request IDs
         await Promise.all(
-            allRequestIds.map(requestId => 
+            allRequestIds.map(requestId =>
                 fulfillRandomChallenge(client, requestId, parentLogId)
                     .catch(error => logger.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
             )
         );
-    
+
         logger.info(`${parentLogId} All challenges fulfilled`);
-    } catch (error:any) {
+    } catch (error: any) {
         logger.error(`${parentLogId} Error in processChallengeRequests:`, error);
         await client.query('ROLLBACK'); // Rollback on failure
-    
+
         logger.error(`SQL State: ${error.code}, Message: ${error.message}`);
-    } 
+    }
 }
 
 // Step 3: Process Output Requests
@@ -237,12 +237,12 @@ export async function cleanupFulfilledEntries(
                     SELECT rsa_id FROM time_lock_puzzles WHERE id = ANY($1)
                 );
             `, [markForDeletion]);
-        
+
             await client.query(`
                 DELETE FROM time_lock_puzzles
                 WHERE id = ANY($1);
             `, [markForDeletion]);
-        
+
             logger.info(`${parentLogId} Deleted ${markForDeletion.length} old completed entries and corresponding RSA keys.`);
         }
 
@@ -315,12 +315,6 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
 
 // Function to check and fetch database entries as needed
 export async function checkAndFetchIfNeeded(client: Client) {
-    // First check if a random generation is already in progress
-    if (ongoingRandomGeneration) {
-        logger.info('A random generation process is already running. Skipping new request.');
-        return;
-    }
-
     try {
         // Query current count of usable DB entries
         const res = await client.query(
@@ -334,21 +328,24 @@ export async function checkAndFetchIfNeeded(client: Client) {
                 logger.warn("Value is -1");
                 logger.warn("Provider has been shut down by USER...");
                 logger.warn("Go to the provider dashboard to turn back on");
+                await updateAvailableValuesAsync(-1);
                 break;
             case -2:
                 logger.error("Value is -2");
                 logger.error("Provider has been shut down by PROCESS...");
                 logger.error("This is due to One of the following: ");
                 logger.error("Failing to provide random fast enough (Provider is not responding to random requests and considered unhealthy NO SLASH)");
-                logger.error("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)" );
+                logger.error("Failing to provide the proof for an outstanding random request within the time. (Provider was likely turned off mid random request SMALL SLASH)");
                 logger.error("Failing to provide the correct proof for your original random (Provider was detected as malicious for tampering with the random LARGE SLASH)");
                 logger.error("Go to the provider dashboard to turn back on");
+                await updateAvailableValuesAsync(-2);
                 break;
             case -3:
                 logger.warn("Value is -3");
                 logger.warn("Provider has been shut down by PROCESS...");
                 logger.warn("This was likely done as a test or to get the maintainers attention. Contact team if you see this and are not sure why");
                 logger.warn("Go to the provider dashboard to turn back on");
+                await updateAvailableValuesAsync(-3);
                 break;
             case -10:
                 logger.info("Value is -10");
@@ -359,92 +356,57 @@ export async function checkAndFetchIfNeeded(client: Client) {
                 logger.debug("Provider is up and working");
                 logger.debug(`Onchain Value is ${current_onchain_random}`);
                 logger.debug(`Local Value is ${currentCount}`);
-                if (Math.abs(current_onchain_random - currentCount) > UNCHAIN_VS_OFFCHAIN_MAX_DIF) {
-                    logger.info(`Updating available random values from ${current_onchain_random} to ${currentCount}`);
-                    updateAvailableValuesAsync(currentCount);
-                } else {
-                    logger.debug(`Not updating onchain values to avoid unneeded onchain messages. When difference is over ${UNCHAIN_VS_OFFCHAIN_MAX_DIF} an update will happen`);
-                }
+                await updateAvailableValuesAsync(currentCount);
+
+        }
+
+        // First check if a random generation is already in progress. If so, see if it's done
+        if (ongoingRandomGeneration) {
+            logger.info('A random generation process is already running. Skipping new request.');
+            await monitorDockerContainers();
+            return;
         }
 
         // Check if more entries are needed
         if (currentCount >= MINIMUM_ENTRIES) return;
-        
+
         // Set the flag to prevent concurrent random generation
         ongoingRandomGeneration = true;
-        
+
         // Calculate how many random values we need
         const entriesNeeded = MINIMUM_ENTRIES - currentCount;
         // Limit to MAX_RANDOM_PER_REQUEST
         const randomToGenerate = Math.min(entriesNeeded, MAX_RANDOM_PER_REQUEST);
-        
+
         logger.info(`Less than ${MINIMUM_ENTRIES} entries found. Fetching ${randomToGenerate} entries (out of ${entriesNeeded} needed)...`);
-        
+
         // Start the random generation with the calculated amount
-        await getMoreRandom(currentCount, randomToGenerate);
+        await getMoreRandom(randomToGenerate);
 
     } catch (error) {
         logger.error('Error during check and fetch:', error);
         ongoingRandomGeneration = false; // Reset the flag on error
     }
-    // Note: we don't reset ongoingRandomGeneration here - it will be reset by the container monitoring
 }
 
+export async function updateAvailableValuesAsync(currentCount: number) {
+    const now = Date.now();
 
-export function updateAvailableValuesAsync(currentCount: number, forceUseOnchainValue: boolean = false) {
-    // If on cooldown, log and exit without updating
-    if (isUpdateOnCooldown) {
-        logger.debug(`Update skipped - on cooldown (${Math.floor((30000 - (Date.now() - lastUpdateTimestamp)) / 1000)}s remaining)`);
+    if (now - lastUpdatedOnChainTime < FIFTEEN_MINUTES_MS) {
+        logger.info(`On-chain update skipped - only ${Math.floor((now - lastUpdatedOnChainTime) / 1000)}s since last update`);
         return;
     }
 
-    return (async () => {
-        try {
-            // Set cooldown status
-            isUpdateOnCooldown = true;
-            lastUpdateTimestamp = Date.now();
-            
-            // Determine which value to use
-            const valueToUpdate = forceUseOnchainValue ? current_onchain_random : currentCount;
-            
-            // Get monitoring data including system specs and performance metrics
-            const monitoringData = await monitoring.getMonitoringData();
-            
-            // Send the count and monitoring data to the AO process
-            await (await getRandomClient()).updateProviderAvailableValues(valueToUpdate, monitoringData);
-            logger.info(`Updated provider values to ${valueToUpdate}${forceUseOnchainValue ? ' (using on-chain value)' : ''}`);
-            
-            // Track last auto-update time if this was a forced update
-            if (forceUseOnchainValue) {
-                lastAutoUpdateTimestamp = Date.now();
-            }
-            
-            // Set timeout to release cooldown after 30 seconds
-            setTimeout(() => {
-                isUpdateOnCooldown = false;
-                logger.debug('Update cooldown period ended');
-            }, 30000);
-        } catch (error) {
-            logger.error("Failed to update provider values:", error);
-            monitoring.incrementErrorCount();
-            // Release cooldown on error after 5 seconds to allow retry
-            setTimeout(() => {
-                isUpdateOnCooldown = false;
-                logger.debug('Update cooldown period ended (after error)');
-            }, 5000);
-        }
-    })();
-}
-
-export async function getProviderAvailableRandomValues(PROVIDER_ID: string): Promise<GetProviderAvailableValuesResponse> {
     try {
-        return {
-            providerId: PROVIDER_ID,
-            availibleRandomValues: current_onchain_random
-        };
+        const monitoringData = await monitoring.getMonitoringData();
+
+        await (await getRandomClient()).updateProviderAvailableValues(currentCount, monitoringData);
+        logger.info(`Updated provider values to ${currentCount}`);
+
+        lastUpdatedOnChainTime = now;
     } catch (error) {
-        logger.error(`Error fetching available random values:`, error);
-        return {} as GetProviderAvailableValuesResponse;
+        logger.error("Failed to update provider values:", error);
+        monitoring.incrementErrorCount();
     }
 }
 
@@ -455,11 +417,11 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
         logger.debug(`${parentLogId} Skipping challenge for request ID ${requestId} - on cooldown`);
         return;
     }
-    
+
     try {
         // Mark this request ID as being processed to prevent duplicates
         challengeCooldowns.set(requestId, true);
-        
+
         // Fetch the necessary details from the database using requestId
         const res = await client.query(
             `SELECT id, modulus, x 
@@ -486,7 +448,7 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
             }
         });
         logger.info(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
-        
+
         // Set a timeout to release the cooldown after 1 second
         setTimeout(() => {
             challengeCooldowns.delete(requestId);
@@ -506,11 +468,11 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
         logger.debug(`${parentLogId} Skipping output for request ID ${requestId} - on cooldown`);
         return;
     }
-    
+
     try {
         // Mark this request ID as being processed to prevent duplicates
         outputCooldowns.set(requestId, true);
-        
+
         // Fetch the output and proof from the database using the requestId
         const res = await client.query(
             `SELECT 
@@ -520,23 +482,23 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
                 rk.q 
             FROM time_lock_puzzles tlp
             JOIN rsa_keys rk ON tlp.rsa_id = rk.id
-            WHERE tlp.request_id = $1`, 
+            WHERE tlp.request_id = $1`,
             [requestId]
         );
-        
+
         if (!res.rowCount) {
             logger.error(`No entry found for request ID: ${requestId}`);
             return;
         }
-        
+
         // Map the response to structured variables
-        const { 
-            id: dbId, 
+        const {
+            id: dbId,
             output,  // Mapping 'y' to 'output'
-            p: rsaP, 
-            q: rsaQ 
+            p: rsaP,
+            q: rsaQ
         } = res.rows[0];
-        
+
         logger.debug(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}, output: ${output}, rsaP: ${rsaP}, rsaQ ${rsaQ} `);
 
         logger.info(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
@@ -548,7 +510,7 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
             }
         });
         logger.info(`${parentLogId} Proof posted for request ID: ${requestId}`);
-        
+
         // Set a timeout to release the cooldown after 1 second
         setTimeout(() => {
             outputCooldowns.delete(requestId);
@@ -561,32 +523,14 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
     }
 }
 
-// Initialize automatic update timer
-export function initializeAutoUpdateTimer() {
-    logger.info('Starting auto update timer for provider values');
-    lastAutoUpdateTimestamp = Date.now(); // Initialize timer start
-    
-    // Set up interval check that runs every minute
-    setInterval(() => {
-        const timeSinceLastUpdate = Date.now() - lastAutoUpdateTimestamp;
-        const tenMinutesInMs = 10 * 60 * 1000;
-        
-        if (timeSinceLastUpdate >= tenMinutesInMs) {
-            logger.info(`Auto-update triggered - ${Math.floor(timeSinceLastUpdate / 60000)} minutes since last update`);
-            updateAvailableValuesAsync(0, true); // Force use of on-chain value
-        }
-    }, 60000); // Check every minute
-}
-
 export async function shutdown() {
+    //TODO do post 0 avalible random then do like as much polling as you can before turning off to ensure all random gets pushed through
     try {
-        const randomClient = await getRandomClient();
-        
-        // Get monitoring data for final update
-        const monitoringData = await monitoring.getMonitoringData();
-        
+        // // Get monitoring data for final update
+        // const monitoringData = await monitoring.getMonitoringData();
+
         // Set provider available values to 0 and include final monitoring data
-        const message = await randomClient.updateProviderAvailableValues(0, monitoringData);
+        const message = await (await getRandomClient()).updateProviderAvailableValues(0);
         logger.info(String(message)); // Convert message to string
         logger.info(`Updated provider values to 0`);
     } catch (error) {
