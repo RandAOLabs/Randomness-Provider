@@ -1,6 +1,6 @@
 import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RequestList } from "ao-process-clients";
 import { Client } from "pg";
-import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
+import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, MINIMUM_RANDOM_DELTA, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
 import { getMoreRandom, monitorDockerContainers } from "./containerManagment";
 import logger, { LogLevel } from "./logger";
 import { monitoring } from "./monitoring";
@@ -368,13 +368,12 @@ export async function checkAndFetchIfNeeded(client: Client) {
         }
 
         // Check if more entries are needed
-        if (currentCount >= MINIMUM_ENTRIES) return;
+        const entriesNeeded = MINIMUM_ENTRIES - currentCount;
+        if (entriesNeeded < MINIMUM_RANDOM_DELTA) return;
 
         // Set the flag to prevent concurrent random generation
         ongoingRandomGeneration = true;
 
-        // Calculate how many random values we need
-        const entriesNeeded = MINIMUM_ENTRIES - currentCount;
         // Limit to MAX_RANDOM_PER_REQUEST
         const randomToGenerate = Math.min(entriesNeeded, MAX_RANDOM_PER_REQUEST);
 
@@ -532,7 +531,7 @@ export async function shutdown() {
         // Set provider available values to 0 and include final monitoring data
         const message = await (await getRandomClient()).updateProviderAvailableValues(0);
         logger.info(String(message)); // Convert message to string
-        logger.info(`Updated provider values to 0`);
+        logger.info(`Updated provider values to 0... shutting down ...`);
     } catch (error) {
         logger.error("Failed to update provider values:", error);
         monitoring.incrementErrorCount();
