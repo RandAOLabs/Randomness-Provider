@@ -9,7 +9,7 @@ export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.5';
 
-export const DOCKER_MONITORING_TIME= 30000;
+export const DOCKER_MONITORING_TIME = 30000;
 export const POLLING_INTERVAL_MS = 0; //0 second
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
 export const MINIMUM_ENTRIES = 5000;
@@ -18,6 +18,8 @@ export const MAX_RETRIES = 10;
 export const RETRY_DELAY_MS = 10000;
 export const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 export const UNCHAIN_VS_OFFCHAIN_MAX_DIF = 50;
+export const MINIMUM_RANDOM_DELTA = 25;
+export const SHUTDOWN_POLLING_DELAY = 10;
 
 let PROVIDER_ID = "";
 let pollingInProgress = false;
@@ -148,10 +150,17 @@ async function run(): Promise<void> {
         logger.info("SIGTERM received. Shutting down gracefully.");
         await client.end();
         await shutdown();
+        for (let i = 0; i < SHUTDOWN_POLLING_DELAY; i++) {
+            try {
+                await polling(client);
+            } catch (error) {
+                logger.error(`Shutdown Polling iteration ${i + 1} failed:`, error);
+            }
+        }
         await Logger.close(); // Use the static close method on the Logger class
         process.exit(0);
     });
-//TODO SEE WHATS BETTER (This could possibly have a new tx queed up while the old one is in the works to keep it speeds but who knows)
+    //TODO SEE WHATS BETTER (This could possibly have a new tx queed up while the old one is in the works to keep it speeds but who knows)
     // setInterval(async () => {
     //     await polling(client);
     // }, POLLING_INTERVAL_MS);
