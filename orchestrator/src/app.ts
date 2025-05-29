@@ -1,7 +1,7 @@
 import Docker from 'dockerode';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
 import Arweave from 'arweave';
-import { checkAndFetchIfNeeded, cleanupFulfilledEntries, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown } from './helperFunctions.js';
+import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
@@ -110,6 +110,9 @@ async function polling(client: any) {
                 //TODO enable this again later
                 await cleanupFulfilledEntries(client, openRequests, logId);
                 await checkAndFetchIfNeeded(client)
+
+                crank(); //TODO find a better place for this
+                
                 const timeTaken = Date.now() - s4;
                 stepTracking.step4 = { completed: true, timeTaken };
                 // Update monitoring with step timing

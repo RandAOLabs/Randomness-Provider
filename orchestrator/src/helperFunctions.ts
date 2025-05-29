@@ -255,6 +255,16 @@ export async function cleanupFulfilledEntries(
     logger.info(`${parentLogId} Step 4 completed.`);
 }
 
+
+//TODO fill in logic for seeinging cranking needs to be done (Also upgrade this to be less message heavy)
+export async function crank() {
+  // 1% chance to run the crank
+  if (Math.random() < 0.01) {
+    logger.info(`Cranking!!!`);
+    await (await getRandomClient()).crank();
+  }
+}
+
 export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
     const defaultResponse: GetOpenRandomRequestsResponse = {
         providerId: PROVIDER_ID,
