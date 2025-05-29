@@ -124,6 +124,7 @@ async function main() {
     const randclient = await getRandomClient()
     //const stakeclient = ProviderStakingClient.autoConfiguration();
 
+    randclient.prepay(1000000000)
     while (true) {
         console.log("Running")
         try {
@@ -133,7 +134,8 @@ async function main() {
                 const callbackId = `callback-${Date.now()}`;
                 const { providers, count } = await getRandomProviders(randclient);
                 console.log(`Selected ${count} providers:`, providers);
-                await randclient.createRequest(providers, count, callbackId);
+                // await randclient.createRequest(providers, count, callbackId);
+                randclient.redeem(providers, count, callbackId);
                 //await TransferToProviders(providers, callbackId)
                 //await randclient.createRequest(["X1tqliRkKnClhVQ4aIeyuOaPTzr5PfnxqAoSdpTzZy8"], 1, "123");
                 totalRandomCalled++;
