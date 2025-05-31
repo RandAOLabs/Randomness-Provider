@@ -23,7 +23,7 @@ services:
         max-file: "5"
 
   orchestrator:
-    image: randao/orchestrator:v1.0.3
+    image: randao/orchestrator:v1.0.4
     depends_on:
       postgres:
         condition: service_healthy

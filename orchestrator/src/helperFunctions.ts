@@ -22,6 +22,9 @@ const outputCooldowns = new Map<string, boolean>();
 let ongoingRandomGeneration = false;
 const MAX_RANDOM_PER_REQUEST = 500; // Maximum number of random values to generate in a single request
 
+// Map to track request timestamps
+const requestTimestamps: Map<string, number> = new Map();
+
 // Function to reset the ongoingRandomGeneration flag
 export function resetOngoingRandomGeneration() {
     ongoingRandomGeneration = false;
@@ -256,13 +259,58 @@ export async function cleanupFulfilledEntries(
 }
 
 
-//TODO fill in logic for seeinging cranking needs to be done (Also upgrade this to be less message heavy)
-export async function crank() {
-  // 1% chance to run the crank
-  if (Math.random() < 0.01) {
-    logger.info(`Cranking!!!`);
-    await (await getRandomClient()).crank();
+/**
+ * Function to log request timestamps
+ * Adds new request IDs to the tracking map and removes ones that are no longer present
+ * @param allRequestIds Array of request IDs to track
+ */
+export function logRequestTimestamps(allRequestIds: string[]): void {
+  const currentTime = Date.now();
+  const existingIds = new Set(requestTimestamps.keys());
+  
+  // Add new request IDs with current timestamp
+  for (const requestId of allRequestIds) {
+    if (!requestTimestamps.has(requestId)) {
+      logger.verbose(`Adding new request ID to tracking: ${requestId}`);
+      requestTimestamps.set(requestId, currentTime);
+    }
   }
+  
+  // Remove request IDs that are no longer present
+  for (const existingId of existingIds) {
+    if (!allRequestIds.includes(existingId)) {
+      logger.verbose(`Removing request ID from tracking: ${existingId}`);
+      requestTimestamps.delete(existingId);
+    }
+  }
+}
+
+// Function to check for defunct requests and crank if needed
+export async function crank() {
+  const currentTime = Date.now();
+  const defunctRequestIds: string[] = [];
+  const DEFUNCT_THRESHOLD_MS = 30 * 1000; // 30 seconds
+  
+  // Check for defunct request IDs (those that have been in the map for over 30 seconds)
+  requestTimestamps.forEach((timestamp, requestId) => {
+    const timeInMap = currentTime - timestamp;
+    if (timeInMap > DEFUNCT_THRESHOLD_MS) {
+      defunctRequestIds.push(requestId);
+      logger.info(`Defunct request found: ${requestId} (in system for ${Math.floor(timeInMap / 1000)} seconds)`);
+    }
+  });
+  
+  // If there are any defunct requests, run the crank
+if (defunctRequestIds.length > 0) {
+  logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
+  (await getRandomClient()).crank();
+} else {
+  // 1 in 100 chance to crank
+  if (Math.floor(Math.random() * 100) === 0) {
+    logger.info("Cranking randomly (1 in 100 chance hit)");
+    (await getRandomClient()).crank();
+  }
+}
 }
 
 export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
@@ -273,6 +321,61 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
     };
     try {
         const response = await (await getRandomClient()).getAllProviderActivity();
+        
+        // Collect all request IDs from all providers for tracking
+        const allRequestIds: string[] = [];
+        
+        // Process each provider to extract request IDs
+        for (const provider of response) {
+            try {
+                // Extract challenge request IDs
+                if (provider.active_challenge_requests && typeof provider.active_challenge_requests === 'string') {
+                    try {
+                        const parsedChallengeData = JSON.parse(provider.active_challenge_requests);
+                        if (parsedChallengeData && typeof parsedChallengeData === 'object' && 'request_ids' in parsedChallengeData) {
+                            const requestIds = parsedChallengeData.request_ids;
+                            if (Array.isArray(requestIds)) {
+                                for (const id of requestIds) {
+                                    if (typeof id === 'string') {
+                                        allRequestIds.push(id);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (parseErr) {
+                        logger.warn(`${parentLogId} Warning: Failed to parse challenge requests JSON for provider ${provider.provider_id}:`, parseErr);
+                    }
+                }
+                
+                // Extract output request IDs
+                if (provider.active_output_requests && typeof provider.active_output_requests === 'string') {
+                    try {
+                        const parsedOutputData = JSON.parse(provider.active_output_requests);
+                        if (parsedOutputData && typeof parsedOutputData === 'object' && 'request_ids' in parsedOutputData) {
+                            const requestIds = parsedOutputData.request_ids;
+                            if (Array.isArray(requestIds)) {
+                                for (const id of requestIds) {
+                                    if (typeof id === 'string') {
+                                        allRequestIds.push(id);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (parseErr) {
+                        logger.warn(`${parentLogId} Warning: Failed to parse output requests JSON for provider ${provider.provider_id}:`, parseErr);
+                    }
+                }
+            } catch (err) {
+                logger.warn(`${parentLogId} Warning: Failed to process provider ${provider.provider_id}:`, err);
+            }
+        }
+        
+        // Log all the request IDs for tracking
+        logger.debug(`${parentLogId} Found ${allRequestIds.length} request IDs across all providers`);
+        
+        // Update the request timestamps tracking
+        logRequestTimestamps(allRequestIds);
+        
         const provider = response.find(p => p.provider_id === PROVIDER_ID);
 
         if (!provider) {
@@ -285,18 +388,30 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         let parsedOutputRequests: RequestList = { request_ids: [] };
 
         try {
-            if (provider.active_challenge_requests) {
-                //@ts-ignore
-                parsedChallengeRequests = JSON.parse(provider.active_challenge_requests);
+            if (provider.active_challenge_requests && typeof provider.active_challenge_requests === 'string') {
+                const parsed = JSON.parse(provider.active_challenge_requests);
+                if (parsed && typeof parsed === 'object' && 'request_ids' in parsed) {
+                    // Ensure we only include string values in the request_ids array
+                    const validRequestIds = Array.isArray(parsed.request_ids) 
+                        ? parsed.request_ids.filter((id: any) => typeof id === 'string')
+                        : [];
+                    parsedChallengeRequests = { request_ids: validRequestIds };
+                }
             }
         } catch (err) {
             logger.warn(`${parentLogId} Warning: Failed to parse active_challenge_requests:`, err);
         }
 
         try {
-            if (provider.active_output_requests) {
-                //@ts-ignore
-                parsedOutputRequests = JSON.parse(provider.active_output_requests);
+            if (provider.active_output_requests && typeof provider.active_output_requests === 'string') {
+                const parsed = JSON.parse(provider.active_output_requests);
+                if (parsed && typeof parsed === 'object' && 'request_ids' in parsed) {
+                    // Ensure we only include string values in the request_ids array
+                    const validRequestIds = Array.isArray(parsed.request_ids) 
+                        ? parsed.request_ids.filter((id: any) => typeof id === 'string')
+                        : [];
+                    parsedOutputRequests = { request_ids: validRequestIds };
+                }
             }
         } catch (err) {
             logger.warn(`${parentLogId} Warning: Failed to parse active_output_requests:`, err);

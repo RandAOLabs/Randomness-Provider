@@ -3,7 +3,7 @@ import {
 } from "ao-process-clients";
 //import { TransferToProviders } from "./extra";
 
-const RETRY_DELAY_MS = 5000; // 1 seconds
+const RETRY_DELAY_MS = 1000; // 1 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -124,7 +124,7 @@ async function main() {
     const randclient = await getRandomClient()
     //const stakeclient = ProviderStakingClient.autoConfiguration();
 
-    randclient.prepay(1000000000)
+    randclient.prepay(1000_000000000) //1,000
     while (true) {
         console.log("Running")
         try {
@@ -135,7 +135,7 @@ async function main() {
                 const { providers, count } = await getRandomProviders(randclient);
                 console.log(`Selected ${count} providers:`, providers);
                 // await randclient.createRequest(providers, count, callbackId);
-                randclient.redeem(providers, count, callbackId);
+                console.log(await randclient.redeem(providers, count, callbackId));
                 //await TransferToProviders(providers, callbackId)
                 //await randclient.createRequest(["X1tqliRkKnClhVQ4aIeyuOaPTzr5PfnxqAoSdpTzZy8"], 1, "123");
                 totalRandomCalled++;
