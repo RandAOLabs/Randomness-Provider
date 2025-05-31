@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@permaweb/aoconnect": "^0.0.78",
-    "ao-process-clients": "^6.0.63",
+    "ao-process-clients": "^6.0.65",
     "ao-vrf": "file:",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.7.7",

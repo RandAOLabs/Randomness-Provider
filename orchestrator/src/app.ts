@@ -5,6 +5,8 @@ import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderReque
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
+export const VERSION = process.env.VERSION || "test";
+
 export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.5';

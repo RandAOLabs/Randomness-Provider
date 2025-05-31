@@ -3,9 +3,9 @@ import fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
-import { version } from '../package.json';
 import logger from './logger';
 import { MonitoringData, PerformanceMetrics, SystemSpecs, ExecutionMetrics, HealthStatus } from 'ao-process-clients';
+import { VERSION } from './app';
 
 const execAsync = promisify(exec);
 
@@ -256,7 +256,7 @@ export class MonitoringService {
 
     // Construct the full MonitoringData object
     const monitoringData: MonitoringData = {
-      providerVersion: version,
+      providerVersion: VERSION,
       timestamp: new Date().toISOString(),
       systemSpecs,
       performance,

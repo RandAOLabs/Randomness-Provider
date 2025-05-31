@@ -16,10 +16,6 @@
     "dockerode": "^4.0.2",
     "pg": "^8.13.1"
   },
-  "name": "ao-vrf",
-  "description": "1. To build:\r ```\r docker build -t serverless-multi-cloud .\r ```",
-  "version": "1.0.3",
-  "main": "Organizer.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
