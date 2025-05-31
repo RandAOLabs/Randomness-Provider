@@ -5,7 +5,7 @@ import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderReque
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
-export const VERSION = process.env.VERSION || "test";
+export const VERSION = process.env.VERSION || "1.0.4";
 
 export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
