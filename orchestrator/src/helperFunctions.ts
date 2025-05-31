@@ -301,16 +301,16 @@ export async function crank() {
   });
   
   // If there are any defunct requests, run the crank
-if (defunctRequestIds.length > 0) {
-  logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
-  (await getRandomClient()).crank();
-} else {
-  // 1 in 100 chance to crank
-  if (Math.floor(Math.random() * 100) === 0) {
-    logger.info("Cranking randomly (1 in 100 chance hit)");
-    (await getRandomClient()).crank();
-  }
-}
+// if (defunctRequestIds.length > 0) {
+//   logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
+//   (await getRandomClient()).crank();
+// } else {
+//   // 1 in 100 chance to crank
+//   if (Math.floor(Math.random() * 100) === 0) {
+//     logger.info("Cranking randomly (1 in 100 chance hit)");
+//     //(await getRandomClient()).crank();
+//   }
+// }
 }
 
 export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
