@@ -39,21 +39,71 @@ setInterval(() => {
 export async function getRandomClient(): Promise<RandomClient> {
     const currentTime = Date.now();
 
-    if (!randomClientInstance || (currentTime - lastInitTime) > REINIT_INTERVAL) {
-        logger.debug("Initializing RandomClient");
-        randomClientInstance = ((await RandomClient.defaultBuilder()))
-            .withWallet(JSON.parse(process.env.WALLET_JSON!))
-            .withAOConfig({
-                CU_URL: "https://ur-cu.randao.net",
-                MU_URL: "https://ur-mu.randao.net",
-                MODE: "legacy"
-            })
-            .build();
-        lastInitTime = currentTime;
-        logger.debug("RandomClient initialized");
+    // If we have a valid instance and it's not time to recreate, return it
+    if (randomClientInstance && (currentTime - lastInitTime) <= REINIT_INTERVAL) {
+        return randomClientInstance;
     }
 
-    return randomClientInstance;
+    // If we're already in the process of creating a new instance, wait for it
+    if (randomClientInstance === null && lastInitTime > 0) {
+        const waitStart = Date.now();
+        while (Date.now() - waitStart < 30000) { // 30 second timeout
+            await new Promise(resolve => setTimeout(resolve, 100));
+            if (randomClientInstance) {
+                return randomClientInstance;
+            }
+        }
+        throw new Error('Timeout waiting for RandomClient initialization');
+    }
+
+    // Mark that we're creating a new instance
+    const previousInstance = randomClientInstance;
+    randomClientInstance = null;
+    lastInitTime = 0;
+
+    try {
+        logger.debug("Initializing new RandomClient instance");
+        const newClient = await (async () => {
+            return ((await RandomClient.defaultBuilder()))
+                .withWallet(JSON.parse(process.env.WALLET_JSON!))
+                .withAOConfig({
+                    CU_URL: "https://ur-cu.randao.net",
+                    MU_URL: "https://ur-mu.randao.net",
+                    MODE: "legacy"
+                })
+                .build();
+        })();
+
+        randomClientInstance = newClient;
+        lastInitTime = Date.now();
+        logger.debug("RandomClient initialized successfully");
+
+        // Clean up previous instance if it exists
+        if (previousInstance) {
+            try {
+                // Check if disconnect method exists before calling it
+                if (typeof (previousInstance as any).disconnect === 'function') {
+                    await (previousInstance as any).disconnect().catch((e: Error) => 
+                        logger.warn('Error disconnecting previous client:', e)
+                    );
+                }
+            } catch (e) {
+                logger.warn('Error during previous client cleanup:', e as Error);
+            }
+        }
+
+        return newClient;
+    } catch (error) {
+        // If we failed to create a new client but had a previous one, keep using it
+        if (previousInstance) {
+            logger.error('Failed to create new RandomClient, falling back to previous instance', error);
+            randomClientInstance = previousInstance;
+            return previousInstance;
+        }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        logger.error('Failed to create RandomClient and no fallback available', errorMessage);
+        throw new Error(`Failed to initialize RandomClient: ${errorMessage}`);
+    }
 }
 
 // Step 2: Process Challenge Requests (Database selection & assigning is atomic)
@@ -319,9 +369,59 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         activeChallengeRequests: { request_ids: [] },
         activeOutputRequests: { request_ids: [] }
     };
+
+    let client: RandomClient | null = null;
+    let response;
+    
     try {
-        const response = await (await getRandomClient()).getAllProviderActivity();
+        // Get client with error handling
+        try {
+            client = await getRandomClient();
+            if (!client) {
+                throw new Error('Failed to initialize RandomClient');
+            }
+        } catch (clientError) {
+            logger.error(`${parentLogId} Failed to initialize RandomClient:`, clientError);
+            return defaultResponse;
+        }
+
+        // Try to get provider activity with retry logic
+        const maxRetries = 2;
+        let lastError: Error | null = null;
         
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                response = await client.getAllProviderActivity();
+                lastError = null;
+                break; // Success, exit retry loop
+            } catch (error) {
+                lastError = error as Error;
+                logger.warn(`${parentLogId} Attempt ${attempt}/${maxRetries} failed to fetch provider activity:`, error);
+                
+                if (attempt < maxRetries) {
+                    // Only recreate the client if this isn't the last attempt
+                    try {
+                        randomClientInstance = null; // Force client recreation on next attempt
+                        client = await getRandomClient();
+                        logger.info(`${parentLogId} Recreated RandomClient for retry attempt ${attempt + 1}`);
+                    } catch (retryError) {
+                        logger.error(`${parentLogId} Failed to recreate RandomClient for retry:`, retryError);
+                    }
+                    // Wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                }
+            }
+        }
+
+        // If we still have an error after retries, handle it
+        if (lastError) {
+            throw lastError;
+        }
+        
+        if (!response) {
+            throw new Error('No response from provider activity');
+        }
+
         // Collect all request IDs from all providers for tracking
         const allRequestIds: string[] = [];
         
@@ -366,7 +466,7 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
                     }
                 }
             } catch (err) {
-                logger.warn(`${parentLogId} Warning: Failed to process provider ${provider.provider_id}:`, err);
+                logger.warn(`${parentLogId} Warning: Failed to process provider ${provider?.provider_id || 'unknown'}:`, err);
             }
         }
         
@@ -376,7 +476,7 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         // Update the request timestamps tracking
         logRequestTimestamps(allRequestIds);
         
-        const provider = response.find(p => p.provider_id === PROVIDER_ID);
+        const provider = response.find((p: any) => p.provider_id === PROVIDER_ID);
 
         if (!provider) {
             logger.warn(`${parentLogId} Warning: Provider with ID ${PROVIDER_ID} not found.`);
@@ -418,10 +518,12 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         }
 
         // Only update current_onchain_random if successful
-        current_onchain_random = provider.random_balance;
+        if (typeof provider.random_balance === 'number') {
+            current_onchain_random = provider.random_balance;
+        }
 
         const result: GetOpenRandomRequestsResponse = {
-            providerId: provider.provider_id,
+            providerId: provider.provider_id || PROVIDER_ID,
             activeChallengeRequests: parsedChallengeRequests,
             activeOutputRequests: parsedOutputRequests,
         };
@@ -433,7 +535,19 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         return result;
 
     } catch (error) {
-        logger.error(`${parentLogId} Error fetching provider requests: ${error}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`${parentLogId} Error in getProviderRequests:`, errorMessage);
+        logger.debug(`${parentLogId} Error details:`, error);
+        
+        // If we have a client that might be in a bad state, try to clean it up
+        if (client) {
+            try {
+                randomClientInstance = null;
+            } catch (cleanupError) {
+                logger.warn(`${parentLogId} Error during client cleanup:`, cleanupError);
+            }
+        }
+        
         return defaultResponse;
     }
 }
@@ -536,129 +650,254 @@ export async function updateAvailableValuesAsync(currentCount: number) {
 
 // Function to post VDF challenge (fetches dbId dynamically)
 async function fulfillRandomChallenge(client: Client, requestId: string, parentLogId: string): Promise<void> {
-    // Check if this request ID is on cooldown
-    if (challengeCooldowns.get(requestId)) {
-        logger.debug(`${parentLogId} Skipping challenge for request ID ${requestId} - on cooldown`);
+    const logPrefix = `${parentLogId} [Challenge ${requestId}]`;
+    
+    // Check if this request is already being processed
+    if (challengeCooldowns.has(requestId)) {
+        logger.debug(`${logPrefix} Request is in cooldown, skipping...`);
         return;
     }
 
-    try {
-        // Mark this request ID as being processed to prevent duplicates
-        challengeCooldowns.set(requestId, true);
-
-        // Fetch the necessary details from the database using requestId
-        const res = await client.query(
-            `SELECT id, modulus, x 
-             FROM time_lock_puzzles 
-             WHERE request_id = $1`,
-            [requestId]
-        );
-
-        if (!res.rowCount) {
-            logger.error(`No entry found for Request ID: ${requestId}`);
-            return;
-        }
-
-        const { id: dbId, modulus, x: input } = res.rows[0];
-
-        logger.debug(`${parentLogId} Fetched entry details - Request ID: ${requestId}, DB ID: ${dbId}, Modulus: ${modulus}, Input: ${input}`);
-
-        logger.info(`${parentLogId} Posting VDF challenge for Request ID: ${requestId}, DB ID: ${dbId}`);
-        await (await getRandomClient()).commit({
-            requestId: requestId,
-            puzzle: {
-                input: input,
-                modulus: modulus
-            }
-        });
-        logger.info(`${parentLogId} Challenge posted for Request ID: ${requestId}. Waiting to post proof...`);
-
-        // Set a timeout to release the cooldown after 1 second
-        setTimeout(() => {
-            challengeCooldowns.delete(requestId);
-            logger.debug(`${parentLogId} Challenge cooldown released for request ID: ${requestId}`);
-        }, 1000);
-    } catch (error) {
-        logger.error(`${parentLogId} Error posting VDF challenge for Request ID: ${requestId}:`, error);
-        // Release the cooldown immediately on error to allow retry
+    // Set cooldown immediately to prevent concurrent processing
+    challengeCooldowns.set(requestId, true);
+    const cooldownTimer = setTimeout(() => {
         challengeCooldowns.delete(requestId);
+        logger.debug(`${logPrefix} Cooldown released`);
+    }, 60000); // 1 minute cooldown
+
+    let randomClient: RandomClient | null = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second base delay
+
+    while (retryCount <= maxRetries) {
+        try {
+            // Get a fresh client for each attempt
+            randomClient = await getRandomClient();
+            if (!randomClient) {
+                throw new Error('Failed to initialize RandomClient');
+            }
+
+            // Fetch the necessary details from the database using requestId
+            const res = await client.query(
+                `SELECT id, modulus, x 
+                 FROM time_lock_puzzles 
+                 WHERE request_id = $1`,
+                [requestId]
+            );
+
+            if (!res.rowCount) {
+                logger.error(`${logPrefix} No database entry found for request`);
+                return;
+            }
+
+
+            const { id: dbId, modulus, x: input } = res.rows[0];
+            
+            if (!modulus || !input) {
+                throw new Error('Missing required fields in database entry');
+            }
+
+            logger.debug(`${logPrefix} Posting VDF challenge for DB ID: ${dbId}`);
+            
+            // Post the VDF challenge
+            await randomClient.commit({
+                requestId: requestId,
+                puzzle: {
+                    input: input,
+                    modulus: modulus
+                }
+            });
+
+            logger.info(`${logPrefix} Successfully posted VDF challenge`);
+            return; // Success, exit the function
+
+        } catch (error) {
+            retryCount++;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            
+            if (retryCount <= maxRetries) {
+                const delay = baseDelay * Math.pow(2, retryCount - 1); // Exponential backoff
+                logger.warn(`${logPrefix} Attempt ${retryCount}/${maxRetries} failed, retrying in ${delay}ms:`, errorMessage);
+                
+                // Force client recreation on retry
+                randomClient = null;
+                randomClientInstance = null;
+                
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                logger.error(`${logPrefix} All ${maxRetries} attempts failed:`, error);
+                // The cooldown was already set at the beginning
+                return;
+            }
+        } finally {
+            // Ensure the client is properly cleaned up
+            if (randomClient) {
+                try {
+                    if (typeof (randomClient as any).disconnect === 'function') {
+                        await (randomClient as any).disconnect().catch((e: Error) => 
+                            logger.warn(`${logPrefix} Error disconnecting client:`, e)
+                        );
+                    }
+                } catch (e) {
+                    logger.warn(`${logPrefix} Error during client cleanup:`, e);
+                }
+            }
+        }
     }
 }
 
 // Function to post VDF output and proof
 async function fulfillRandomOutput(client: Client, requestId: string, parentLogId: string): Promise<void> {
-    // Check if this request ID is on cooldown
-    if (outputCooldowns.get(requestId)) {
-        logger.debug(`${parentLogId} Skipping output for request ID ${requestId} - on cooldown`);
+    const logPrefix = `${parentLogId} [Output ${requestId}]`;
+    
+    // Check if this request is already being processed
+    if (outputCooldowns.has(requestId)) {
+        logger.debug(`${logPrefix} Request is in cooldown, skipping...`);
         return;
     }
 
-    try {
-        // Mark this request ID as being processed to prevent duplicates
-        outputCooldowns.set(requestId, true);
-
-        // Fetch the output and proof from the database using the requestId
-        const res = await client.query(
-            `SELECT 
-                tlp.id, 
-                tlp.y AS output, 
-                rk.p, 
-                rk.q 
-            FROM time_lock_puzzles tlp
-            JOIN rsa_keys rk ON tlp.rsa_id = rk.id
-            WHERE tlp.request_id = $1`,
-            [requestId]
-        );
-
-        if (!res.rowCount) {
-            logger.error(`No entry found for request ID: ${requestId}`);
-            return;
-        }
-
-        // Map the response to structured variables
-        const {
-            id: dbId,
-            output,  // Mapping 'y' to 'output'
-            p: rsaP,
-            q: rsaQ
-        } = res.rows[0];
-
-        logger.debug(`${parentLogId} Fetched entry from database for output - ID: ${dbId}, requestID: ${requestId}, output: ${output}, rsaP: ${rsaP}, rsaQ ${rsaQ} `);
-
-        logger.info(`${parentLogId} Posting VDF output and proof for - ID: ${dbId}, request ID: ${requestId}`);
-        await (await getRandomClient()).reveal({
-            requestId: requestId,
-            rsa_key: {
-                p: rsaP,
-                q: rsaQ
-            }
-        });
-        logger.info(`${parentLogId} Proof posted for request ID: ${requestId}`);
-
-        // Set a timeout to release the cooldown after 1 second
-        setTimeout(() => {
-            outputCooldowns.delete(requestId);
-            logger.debug(`${parentLogId} Output cooldown released for request ID: ${requestId}`);
-        }, 1000);
-    } catch (error) {
-        logger.error(`${parentLogId} Error fulfilling random output for request ID: ${requestId}:`, error);
-        // Release the cooldown immediately on error to allow retry
+    // Set cooldown immediately to prevent concurrent processing
+    outputCooldowns.set(requestId, true);
+    const cooldownTimer = setTimeout(() => {
         outputCooldowns.delete(requestId);
+        logger.debug(`${logPrefix} Cooldown released`);
+    }, 60000); // 1 minute cooldown
+
+    let randomClient: RandomClient | null = null;
+    let retryCount = 0;
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second base delay
+
+    while (retryCount <= maxRetries) {
+        try {
+            // Get a fresh client for each attempt
+            randomClient = await getRandomClient();
+            if (!randomClient) {
+                throw new Error('Failed to initialize RandomClient');
+            }
+
+            // Fetch the output and proof from the database using the requestId
+            const res = await client.query(
+                `SELECT 
+                    tlp.id, 
+                    tlp.y AS output, 
+                    rk.p, 
+                    rk.q 
+                FROM time_lock_puzzles tlp
+                JOIN rsa_keys rk ON tlp.rsa_id = rk.id
+                WHERE tlp.request_id = $1`,
+                [requestId]
+            );
+
+            if (!res.rowCount) {
+                logger.error(`${logPrefix} No database entry found for request`);
+                return;
+            }
+
+
+            const { id: dbId, output, p: rsaP, q: rsaQ } = res.rows[0];
+            
+            if (!output || !rsaP || !rsaQ) {
+                throw new Error('Missing required fields in database entry');
+            }
+
+            logger.debug(`${logPrefix} Posting VDF output and proof for DB ID: ${dbId}`);
+            
+            // Post the VDF output and proof
+            await randomClient.reveal({
+                requestId: requestId,
+                rsa_key: {
+                    p: rsaP,
+                    q: rsaQ
+                }
+            });
+
+            logger.info(`${logPrefix} Successfully posted VDF output and proof`);
+            return; // Success, exit the function
+
+        } catch (error) {
+            retryCount++;
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            
+            if (retryCount <= maxRetries) {
+                const delay = baseDelay * Math.pow(2, retryCount - 1); // Exponential backoff
+                logger.warn(`${logPrefix} Attempt ${retryCount}/${maxRetries} failed, retrying in ${delay}ms:`, errorMessage);
+                
+                // Force client recreation on retry
+                randomClient = null;
+                randomClientInstance = null;
+                
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                logger.error(`${logPrefix} All ${maxRetries} attempts failed:`, error);
+                // The cooldown was already set at the beginning
+                return;
+            }
+        } finally {
+            // Ensure the client is properly cleaned up
+            if (randomClient) {
+                try {
+                    if (typeof (randomClient as any).disconnect === 'function') {
+                        await (randomClient as any).disconnect().catch((e: Error) => 
+                            logger.warn(`${logPrefix} Error disconnecting client:`, e)
+                        );
+                    }
+                } catch (e) {
+                    logger.warn(`${logPrefix} Error during client cleanup:`, e);
+                }
+            }
+        }
     }
 }
 
 export async function shutdown() {
-    //TODO do post 0 avalible random then do like as much polling as you can before turning off to ensure all random gets pushed through
+    const logPrefix = '[Shutdown]';
+    let randomClient: RandomClient | null = null;
+    
     try {
-        // // Get monitoring data for final update
-        // const monitoringData = await monitoring.getMonitoringData();
-
+        logger.info(`${logPrefix} Starting graceful shutdown sequence`);
+        
+        // Get monitoring data for final update
+        const monitoringData = await monitoring.getMonitoringData();
+        
+        // Get a fresh client for the shutdown sequence
+        randomClient = await getRandomClient();
+        if (!randomClient) {
+            throw new Error('Failed to initialize RandomClient during shutdown');
+        }
+        
         // Set provider available values to 0 and include final monitoring data
-        const message = await (await getRandomClient()).updateProviderAvailableValues(0);
-        logger.info(String(message)); // Convert message to string
-        logger.info(`Updated provider values to 0... shutting down ...`);
+        logger.info(`${logPrefix} Updating provider values to 0...`);
+        await randomClient.updateProviderAvailableValues(0, monitoringData);
+        
+        logger.info(`${logPrefix} Provider values updated to 0`);
+        
+        // Add a small delay to ensure the update is processed
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        logger.info(`${logPrefix} Shutdown sequence completed`);
+        
     } catch (error) {
-        logger.error("Failed to update provider values:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`${logPrefix} Error during shutdown:`, errorMessage);
+        logger.debug(`${logPrefix} Error details:`, error);
         monitoring.incrementErrorCount();
+    } finally {
+        // Ensure the client is properly cleaned up
+        if (randomClient) {
+            try {
+                if (typeof (randomClient as any).disconnect === 'function') {
+                    await (randomClient as any).disconnect().catch((e: Error) => 
+                        logger.warn(`${logPrefix} Error disconnecting client:`, e)
+                    );
+                }
+            } catch (e) {
+                logger.warn(`${logPrefix} Error during client cleanup:`, e);
+            }
+        }
+        
+        // Clear the client instance to ensure a fresh start if the process continues
+        randomClientInstance = null;
     }
 }
