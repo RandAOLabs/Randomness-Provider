@@ -8,7 +8,7 @@ import { setTimeout, setInterval } from 'timers';
 
 let randomClientInstance: RandomClient | null = null;
 let lastInitTime: number = 0;
-const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour in milliseconds
+const REINIT_INTERVAL = 60 * 1 * 1000; // 1 minute in milliseconds
 let current_onchain_random = - 10
 
 // Cooldown tracking for updateAvailableValuesAsync
@@ -25,85 +25,65 @@ const MAX_RANDOM_PER_REQUEST = 500; // Maximum number of random values to genera
 // Map to track request timestamps
 const requestTimestamps: Map<string, number> = new Map();
 
+let isInitializing = false; // Track if initialization is in progress
+let initPromise: Promise<RandomClient> | null = null; // Store the initialization promise
+
 // Function to reset the ongoingRandomGeneration flag
 export function resetOngoingRandomGeneration() {
     ongoingRandomGeneration = false;
     logger.info('Random generation flag reset. System ready for new random generation requests.');
 }
 
-// Optional: Auto-reinitialize on a timer
-setInterval(() => {
-    randomClientInstance = null;
-}, REINIT_INTERVAL);
-
 export async function getRandomClient(): Promise<RandomClient> {
     const currentTime = Date.now();
 
-    // If we have a valid instance and it's not time to recreate, return it
+    // Return the existing instance if it's valid and fresh
     if (randomClientInstance && (currentTime - lastInitTime) <= REINIT_INTERVAL) {
         return randomClientInstance;
     }
 
-    // If we're already in the process of creating a new instance, wait for it
-    if (randomClientInstance === null && lastInitTime > 0) {
-        const waitStart = Date.now();
-        while (Date.now() - waitStart < 30000) { // 30 second timeout
-            await new Promise(resolve => setTimeout(resolve, 100));
-            if (randomClientInstance) {
-                return randomClientInstance;
-            }
-        }
-        throw new Error('Timeout waiting for RandomClient initialization');
+    // If reinitialization is already happening, serve the old instance
+    if (isInitializing) {
+        logger.info('[RandomClient] Reinitialization in progress, serving old instance');
+        return randomClientInstance!;
     }
 
-    // Mark that we're creating a new instance
-    const previousInstance = randomClientInstance;
-    randomClientInstance = null;
-    lastInitTime = 0;
+    // Start reinitialization in the background
+    isInitializing = true;
+    logger.info('[RandomClient] Background reinitialization triggered');
 
-    try {
-        logger.debug("Initializing new RandomClient instance");
-        const newClient = await (async () => {
-            return ((await RandomClient.defaultBuilder()))
+    (async () => {
+        try {
+            const newClient = await (await RandomClient.defaultBuilder())
                 .withWallet(JSON.parse(process.env.WALLET_JSON!))
                 .withAOConfig({
-                    CU_URL: "https://ur-cu.randao.net",
-                    MU_URL: "https://ur-mu.randao.net",
-                    MODE: "legacy"
+                    CU_URL: process.env.CU_URL || "https://ur-cu.randao.net",
+                    MU_URL: process.env.MU_URL || "https://ur-mu.randao.net",
+                    MODE: "legacy" as const
                 })
                 .build();
-        })();
 
-        randomClientInstance = newClient;
-        lastInitTime = Date.now();
-        logger.debug("RandomClient initialized successfully");
-
-        // Clean up previous instance if it exists
-        if (previousInstance) {
-            try {
-                // Check if disconnect method exists before calling it
-                if (typeof (previousInstance as any).disconnect === 'function') {
-                    await (previousInstance as any).disconnect().catch((e: Error) => 
-                        logger.warn('Error disconnecting previous client:', e)
-                    );
-                }
-            } catch (e) {
-                logger.warn('Error during previous client cleanup:', e as Error);
-            }
+            // Swap instance only once it's ready
+            randomClientInstance = newClient;
+            lastInitTime = Date.now();
+            logger.info('[RandomClient] Successfully reinitialized client');
+        } catch (err) {
+            logger.error('[RandomClient] Reinitialization failed:', err);
+        } finally {
+            isInitializing = false;
         }
+    })();
 
-        return newClient;
-    } catch (error) {
-        // If we failed to create a new client but had a previous one, keep using it
-        if (previousInstance) {
-            logger.error('Failed to create new RandomClient, falling back to previous instance', error);
-            randomClientInstance = previousInstance;
-            return previousInstance;
-        }
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        logger.error('Failed to create RandomClient and no fallback available', errorMessage);
-        throw new Error(`Failed to initialize RandomClient: ${errorMessage}`);
-    }
+    // Return the old instance immediately
+    return randomClientInstance!;
+}
+
+
+// Add a method to explicitly refresh the client if needed
+export async function refreshRandomClient(): Promise<RandomClient> {
+    randomClientInstance = null;
+    lastInitTime = 0;
+    return getRandomClient();
 }
 
 // Step 2: Process Challenge Requests (Database selection & assigning is atomic)
@@ -351,16 +331,16 @@ export async function crank() {
   });
   
   // If there are any defunct requests, run the crank
-// if (defunctRequestIds.length > 0) {
-//   logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
-//   (await getRandomClient()).crank();
-// } else {
-//   // 1 in 100 chance to crank
-//   if (Math.floor(Math.random() * 100) === 0) {
-//     logger.info("Cranking randomly (1 in 100 chance hit)");
-//     //(await getRandomClient()).crank();
-//   }
-// }
+if (defunctRequestIds.length > 0) {
+  logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
+  (await getRandomClient()).crank();
+} else {
+  // 1 in 100 chance to crank
+  if (Math.floor(Math.random() * 100) === 0) {
+    logger.info("Cranking randomly (1 in 100 chance hit)");
+    //(await getRandomClient()).crank();
+  }
+}
 }
 
 export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {

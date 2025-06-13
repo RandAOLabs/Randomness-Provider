@@ -86,14 +86,11 @@ To run a node, you'll need:
    Then edit the `.env` file and fill in all required variables:
 
    **Required Variables:**
-   - `provider_id`: Your unique provider identifier
-   - `local_db_user`: Database username
-   - `local_db_password`: Database password
-   - `local_wallet_json`: Your wallet information (either directly pasted or as a file path)
-
-   **Optional Variables (with defaults):**
-   - `db_name`: Database name (default: orchestrator_db)
-   - `secrets_prefix`: Prefix for secrets (default: /orchestrator)
+   - `local_db_user`: Database username (optional to change)
+   - `local_db_password`: Database password (optional to change)
+   - `db_name`: Database name (optional to change)
+   - `LOG_CONSOLE_LEVEL`: The log level you want to see
+   - `local_wallet_json`: Your wallet information
 
 2. **Deploy Your Provider**
    From the Docker Compose directory, run:

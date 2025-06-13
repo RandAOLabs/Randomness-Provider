@@ -3,7 +3,7 @@ import {
 } from "ao-process-clients";
 //import { TransferToProviders } from "./extra";
 
-const RETRY_DELAY_MS = 1000; // 1 seconds
+const RETRY_DELAY_MS = 5000; // 1 seconds
 const PROVIDER_REFRESH_INTERVAL = 10 * 60 * 1000; // 10 minutes
 const PROVIDER_REQUEST_TIMEOUT = 60 * 1000; // 1 minute
 const CHANCE_TO_CALL_RANDOM = 1;
@@ -22,7 +22,7 @@ let lastProviderRefresh = 0;
 
 let randomClientInstance: RandomClient | null = null;
 
-async function getRandomClient(): Promise<RandomClient> {
+export async function getRandomClient(): Promise<RandomClient> {
     
     if (!randomClientInstance) {
         randomClientInstance = ((await RandomClient.defaultBuilder()))
@@ -120,11 +120,19 @@ async function getRandomProviders(randclient: RandomClient): Promise<{ providers
     }
 }
 
+import { startRequestTracker } from "./requestTracker";
+
 async function main() {
     const randclient = await getRandomClient()
     //const stakeclient = ProviderStakingClient.autoConfiguration();
 
     randclient.prepay(1000_000000000) //1,000
+    
+    // Start request tracker in a separate process
+    // This will continuously poll for provider activity and crank defunct requests
+    startRequestTracker().catch(error => {
+        console.error("Error starting request tracker:", error);
+    });
     while (true) {
         console.log("Running")
         try {
