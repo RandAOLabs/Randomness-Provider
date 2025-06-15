@@ -23,7 +23,9 @@ services:
         max-file: "5"
 
   orchestrator:
-    image: randao/orchestrator:v1.0.8
+    image: randao/orchestrator:latest
+    pull_policy: always  # Ensure the latest image is always pulled
+    restart: on-failure  # Restart on crash (or on exit with non-zero code)
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,23 +35,25 @@ services:
       DB_USER: ${DB_USER:-myuser}
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
-      PATH_TO_WALLET: /app/wallet.json  # Path inside the container
+      PATH_TO_WALLET: /app/wallet.json
       WALLET_JSON: ${WALLET_JSON}
-      DOCKER_NETWORK: backend  # Passing the network name
+      DOCKER_NETWORK: backend
     networks:
       - backend
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
-      - ./wallet.json:/app/wallet.json  # Mount wallet.json into the container
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./wallet.json:/app/wallet.json
     logging:
       driver: json-file
       options:
         max-size: "100m"
         max-file: "5"
+    command: ["sh", "-c", "sleep 3600 && kill 1"]
+    # The above line causes the orchestrator to kill itself every hour; customize `sleep` as needed.
 
 networks:
   backend:
-    name: backend  # This will set the network name explicitly
+    name: backend
     driver: bridge
 
 volumes:
