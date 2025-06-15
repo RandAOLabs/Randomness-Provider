@@ -566,6 +566,17 @@ export async function checkAndFetchIfNeeded(client: Client) {
                 logger.warn("Go to the provider dashboard to turn back on");
                 await updateAvailableValuesAsync(-3);
                 break;
+            case -4:
+                logger.warn("Value is -4");
+                logger.warn("Nothing Set up for this yet");
+                await updateAvailableValuesAsync(-4);
+                break;
+            case -5:
+                logger.warn("Value is -5");
+                logger.warn("Provider has been told to kill itself and restart. Taking action now");
+                await shutdown();
+                process.exit(1);
+                break;
             case -10:
                 logger.info("Value is -10");
                 logger.info("Provider has been turned on and is starting up OR is not staked yet");
