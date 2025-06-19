@@ -1,20 +1,21 @@
 import Docker from 'dockerode';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
 import Arweave from 'arweave';
-import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, shutdown } from './helperFunctions.js';
+import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
-export const VERSION = process.env.VERSION || "1.0.9";
+export const VERSION = "1.0.10";
 
 export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.5';
+export const ORCHESTRATOR_IMAGE = 'randao/orchestrator:latest';
 
 export const DOCKER_MONITORING_TIME = 30000;
 export const POLLING_INTERVAL_MS = 0; //0 second
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
-export const MINIMUM_ENTRIES = 5000;
+export const MINIMUM_ENTRIES = 10000;
 export const DRYRUNTIMEOUT = 30000; // 30 seconds
 export const MAX_RETRIES = 10;
 export const RETRY_DELAY_MS = 10000;
@@ -154,7 +155,7 @@ async function run(): Promise<void> {
     process.on("SIGTERM", async () => {
         logger.info("SIGTERM received. Shutting down gracefully.");
         await client.end();
-        await shutdown();
+        await gracefulShutdown();
         for (let i = 0; i < SHUTDOWN_POLLING_DELAY; i++) {
             try {
                 await polling(client);

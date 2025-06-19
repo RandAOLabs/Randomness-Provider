@@ -9,9 +9,63 @@ export interface NetworkConfig {
 }
 
 // Global variables to track polling status
-let pulledDockerimage = false;
+// Track which images have been pulled
+let pulledDockerImage = false;
 let pullingImagePromise: Promise<void> | null = null; // Add at the top-level scope (module-global)
 const ongoingContainers = new Set<string>(); // Track container IDs of running Docker containers
+
+/**
+ * Pull a Docker image if it hasn't been pulled already
+ * @param imageName The name of the image to pull
+ * @returns A promise that resolves when the image has been pulled
+ */
+export async function pullDockerImage(imageName: string): Promise<boolean> {
+  // Skip if already pulled
+  if (pulledDockerImage) {
+    logger.debug(`Image ${imageName} already pulled, skipping pull operation`);
+    return true;
+  }
+
+  // If a pull is already in progress for this image, wait for it
+  if (pullingImagePromise) {
+    try {
+      await pullingImagePromise;
+      return true;
+    } catch (error) {
+      logger.error(`Failed to pull Docker image ${imageName}:`, error);
+      return false;
+    }
+  }
+
+  // Start a new pull operation
+  pullingImagePromise  = new Promise<void>((resolve, reject) => {
+    logger.info(`Pulling image: ${imageName}`);
+    docker.pull(imageName, (err: Error | null, stream: NodeJS.ReadableStream | undefined) => {
+      if (err || !stream) {
+        pullingImagePromise = null; // reset on error
+        return false;
+      }
+      docker.modem.followProgress(stream, (doneErr: Error | null) => {
+        if (doneErr) {
+          pullingImagePromise = null; // reset on error
+          reject(doneErr);
+        } else {
+          pulledDockerImage = true; // Mark as pulled after success
+          resolve();
+        }
+      });
+    });
+  });
+
+    try {
+      await pullingImagePromise;
+      return true;
+    } catch (error) {
+      logger.error(`Failed to pull Docker image:`, error);
+      pullingImagePromise = null;
+      return false;
+    }
+  }
 
 export async function triggerTimePuzzleJobPod(randomCount: number): Promise<string | null> {
   const containerName = `puzzle-gen_job_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
@@ -22,7 +76,7 @@ export async function triggerTimePuzzleJobPod(randomCount: number): Promise<stri
   }
 
   // Ensure only one pull operation at a time
-  if (!pulledDockerimage) {
+  if (!pulledDockerImage) {
     if (!pullingImagePromise) {
       pullingImagePromise = new Promise<void>((resolve, reject) => {
         logger.info(`Pulling image: ${TIME_PUZZLE_JOB_IMAGE}`);
@@ -36,7 +90,7 @@ export async function triggerTimePuzzleJobPod(randomCount: number): Promise<stri
               pullingImagePromise = null; // reset on error
               reject(doneErr);
             } else {
-              pulledDockerimage = true; // Mark as pulled after success
+              pulledDockerImage = true; // Mark as pulled after success
               resolve();
             }
           });
