@@ -1,7 +1,7 @@
 import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RequestList } from "ao-process-clients";
 import { Client } from "pg";
-import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, MINIMUM_RANDOM_DELTA, UNCHAIN_VS_OFFCHAIN_MAX_DIF } from "./app";
-import { getMoreRandom, monitorDockerContainers } from "./containerManagment";
+import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, MINIMUM_RANDOM_DELTA, UNCHAIN_VS_OFFCHAIN_MAX_DIF, ORCHESTRATOR_IMAGE, docker } from "./app";
+import { getMoreRandom, monitorDockerContainers, pullDockerImage } from "./containerManagment";
 import logger, { LogLevel } from "./logger";
 import { monitoring } from "./monitoring";
 import { setTimeout, setInterval } from 'timers';
@@ -331,16 +331,16 @@ export async function crank() {
   });
   
   // If there are any defunct requests, run the crank
-if (defunctRequestIds.length > 0) {
-  logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
-  (await getRandomClient()).crank();
-} else {
-  // 1 in 100 chance to crank
-  if (Math.floor(Math.random() * 100) === 0) {
-    logger.info("Cranking randomly (1 in 100 chance hit)");
-    //(await getRandomClient()).crank();
-  }
-}
+// if (defunctRequestIds.length > 0) {
+//   logger.info(`Cranking due to ${defunctRequestIds.length} defunct requests: ${defunctRequestIds.join(', ')}`);
+//   (await getRandomClient()).crank();
+// } else {
+//   // 1 in 100 chance to crank
+//   if (Math.floor(Math.random() * 100) === 0) {
+//     logger.info("Cranking randomly (1 in 100 chance hit)");
+//     //(await getRandomClient()).crank();
+//   }
+// }
 }
 
 export async function getProviderRequests(PROVIDER_ID: string, parentLogId: string): Promise<GetOpenRandomRequestsResponse> {
@@ -573,8 +573,22 @@ export async function checkAndFetchIfNeeded(client: Client) {
                 break;
             case -5:
                 logger.warn("Value is -5");
-                logger.warn("Provider has been told to kill itself and restart. Taking action now");
-                await shutdown();
+                logger.warn("Provider has been told to pull the latest image and restart. Taking action now");
+                
+                // Pull the randomrequester image
+                logger.info(`Attempting to pull Docker image: ${ORCHESTRATOR_IMAGE}`);
+                const pullSuccess = await pullDockerImage(ORCHESTRATOR_IMAGE);
+                
+                if (pullSuccess) {
+                    logger.info(`Successfully pulled image: ${ORCHESTRATOR_IMAGE}`);
+                } else {
+                    logger.error(`Failed to pull image: ${ORCHESTRATOR_IMAGE}`);
+                }
+                
+                // Regardless of pull result, proceed with shutdown and restart
+                await gracefulShutdown();
+                const container = docker.getContainer(process.env.HOSTNAME || ""); // or use docker ps/inspect to get container ID
+                await container.remove({ force: true });
                 process.exit(1);
                 break;
             case -10:
@@ -842,7 +856,7 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
     }
 }
 
-export async function shutdown() {
+export async function gracefulShutdown() {
     const logPrefix = '[Shutdown]';
     let randomClient: RandomClient | null = null;
     
@@ -875,20 +889,22 @@ export async function shutdown() {
         logger.debug(`${logPrefix} Error details:`, error);
         monitoring.incrementErrorCount();
     } finally {
-        // Ensure the client is properly cleaned up
-        if (randomClient) {
-            try {
-                if (typeof (randomClient as any).disconnect === 'function') {
-                    await (randomClient as any).disconnect().catch((e: Error) => 
-                        logger.warn(`${logPrefix} Error disconnecting client:`, e)
-                    );
-                }
-            } catch (e) {
-                logger.warn(`${logPrefix} Error during client cleanup:`, e);
-            }
-        }
+        // // Ensure the client is properly cleaned up
+        // if (randomClient) {
+        //     try {
+        //         if (typeof (randomClient as any).disconnect === 'function') {
+        //             await (randomClient as any).disconnect().catch((e: Error) => 
+        //                 logger.warn(`${logPrefix} Error disconnecting client:`, e)
+        //             );
+        //         }
+        //     } catch (e) {
+        //         logger.warn(`${logPrefix} Error during client cleanup:`, e);
+        //     }
+        // }
         
-        // Clear the client instance to ensure a fresh start if the process continues
-        randomClientInstance = null;
+        // // Clear the client instance to ensure a fresh start if the process continues
+        // randomClientInstance = null;
+
+        
     }
 }
