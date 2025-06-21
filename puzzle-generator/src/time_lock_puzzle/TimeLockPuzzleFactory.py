@@ -2,6 +2,7 @@ from typing import List, Tuple
 import multiprocessing
 
 from src.time_lock_puzzle import TimeLockPuzzleBuilder
+from ..utils.SystemSpecs import SystemSpecs
 from ..mpc import MPC
 from ..mpc.types import MPZ
 from ..random import Random
@@ -50,8 +51,10 @@ class TimeLockPuzzleFactory(ITimeLockPuzzleFactory):
         # Create parameters for each puzzle
         puzzle_params = [(self._bit_size, self._t) for _ in range(amount)]
 
+        num_workers = SystemSpecs.get_num_parallel_processes()
+
         # Create puzzles in parallel using process pool
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(num_workers) as pool:
             puzzles = pool.map(
                 TimeLockPuzzleFactory._create_puzzle_parallel, puzzle_params
             )
