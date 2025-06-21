@@ -2,6 +2,7 @@ from multiprocessing import Pool
 from typing import List, Tuple
 
 from ..mpc import MPC
+from ..utils.SystemSpecs import SystemSpecs
 from ..mpc.types import MPZ
 from ..rsa.RSA import RSA
 from .abstract.IEfficientTimeLockPuzzleSolver import IEfficientTimeLockPuzzleSolver
@@ -32,7 +33,8 @@ class EfficientTimeLockPuzzleSolver(IEfficientTimeLockPuzzleSolver):
         Returns:
             List of solutions in the same order as input puzzles
         """
-        with Pool() as pool:
+        num_workers = SystemSpecs.get_num_parallel_processes()
+        with Pool(num_workers) as pool:
             return pool.map(EfficientTimeLockPuzzleSolver._solve_single, puzzles)
 
     # Private Methods
