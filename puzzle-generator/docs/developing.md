@@ -60,7 +60,7 @@ pytest --cov=src
 
 
 # Set version as an environment variable
-export VERSION=v0.1.5  # Change this value as needed
+export VERSION=v0.1.6  # Change this value as needed
 
 # Initial build and tagging for local testing
 docker build -t randao/puzzle-gen:latest -t randao/puzzle-gen:$VERSION .
@@ -77,7 +77,7 @@ docker buildx create --name arm-builder --use || docker buildx use arm-builder
 docker buildx inspect --bootstrap
 
 # Multi-platform build for ARM64 and AMD64, and push to Docker Hub
-docker buildx build --platform linux/amd64,linux/arm64 \
+docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
   -t randao/puzzle-gen:latest \
   -t randao/puzzle-gen:$VERSION \
   --push .
