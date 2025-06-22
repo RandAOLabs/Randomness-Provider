@@ -17,7 +17,7 @@ Random deletes itself from the db the moment its been used and not requested. It
 
 
 # Export version as an environment variable
-export VERSION=v1.0.11  # You can change this value to any version you want
+export VERSION=v1.0.12  # You can change this value to any version you want
 
 # Build the Docker image with the version tag
 docker build -t randao/orchestrator:latest -t randao/orchestrator:$VERSION .
@@ -34,7 +34,7 @@ docker buildx create --use
 docker buildx inspect --bootstrap
 
 # Build the multi-platform image and push it
-docker buildx build --platform linux/amd64,linux/arm64 \
+docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
 -t randao/orchestrator:latest \
 -t randao/orchestrator:$VERSION \
 --push .
