@@ -24,7 +24,7 @@ services:
 
   orchestrator:
     image: randao/orchestrator:latest
-    pull_policy: always  # Ensure the latest image is always pulled
+    # pull_policy: always  # Ensure the latest image is always pulled
     restart: unless-stopped  # Restart on crash (or on exit with non-zero code)
     depends_on:
       postgres:
@@ -35,6 +35,7 @@ services:
       DB_USER: ${DB_USER:-myuser}
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
+      SEED_PHRASE: ${SEED_PHRASE}
       WALLET_JSON: ${WALLET_JSON}
       DOCKER_NETWORK: backend
     networks:

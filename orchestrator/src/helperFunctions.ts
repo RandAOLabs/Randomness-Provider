@@ -5,6 +5,7 @@ import { getMoreRandom, monitorDockerContainers, pullDockerImage } from "./conta
 import logger, { LogLevel } from "./logger";
 import { monitoring } from "./monitoring";
 import { setTimeout, setInterval } from 'timers';
+import { getWallet } from "./walletUtils";
 
 let randomClientInstance: RandomClient | null = null;
 let lastInitTime: number = 0;
@@ -54,8 +55,11 @@ export async function getRandomClient(): Promise<RandomClient> {
 
     (async () => {
         try {
+            // Use the wallet utilities to get the wallet (prioritizes SEED_PHRASE over WALLET_JSON)
+            const wallet = await getWallet();
+            
             const newClient = await (await RandomClient.defaultBuilder())
-                .withWallet(JSON.parse(process.env.WALLET_JSON!))
+                .withWallet(wallet)
                 .withAOConfig({
                     CU_URL: process.env.CU_URL || "https://ur-cu.randao.net",
                     MU_URL: process.env.MU_URL || "https://ur-mu.randao.net",
