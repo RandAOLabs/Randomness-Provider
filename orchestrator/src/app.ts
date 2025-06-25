@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
-import Arweave from 'arweave';
+import Arweave from "arweave";
+import { getWalletAddress } from "./walletUtils";
 import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
@@ -146,9 +147,13 @@ async function run(): Promise<void> {
     const client = await connectWithRetry();
     await setupDatabase(client);
 
-    arweave.wallets.jwkToAddress(JSON.parse(process.env.WALLET_JSON!)).then((address) => {
+    // Initialize wallet and set provider ID using wallet utilities
+    getWalletAddress().then((address) => {
         logger.info(`Provider ID: ${address}`);
         PROVIDER_ID = address;
+    }).catch(error => {
+        logger.error('Failed to initialize wallet:', error);
+        process.exit(1);
     });
 
     // Handle graceful shutdown before entering infinite loop
