@@ -1,0 +1,99 @@
+#!/bin/sh
+# postinst script for randao-provider Debian package
+
+set -e # Exit immediately if a command exits with a non-zero status
+
+# --- 1. Define Paths and Logging ---
+LOG_FILE="/var/log/randao-provider-postinst.log"
+USERNAME="randao_service"
+GROUPNAME="randao_service"
+DOCKER_GROUP="docker"
+ETC_RANDAO_DIR="/etc/randao"
+APP_ROOT_DIR="/opt/randao-provider"
+
+# Initialize log file with secure permissions
+touch "$LOG_FILE"
+chmod 600 "$LOG_FILE"
+
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - postinst: $1" >> "$LOG_FILE"
+}
+
+log_message "Starting randao-provider post-installation script."
+
+# --- 2. Create the dedicated system user and group ---
+log_message "Checking for user '$USERNAME' and group '$GROUPNAME'."
+if ! id -u "$USERNAME" >/dev/null 2>&1; then
+    log_message "Creating system user '$USERNAME' with a dynamic UID."
+    # Let the system pick a safe UID automatically
+    adduser --system --no-create-home --group "$USERNAME"
+    log_message "User '$USERNAME' created."
+else
+    log_message "User '$USERNAME' already exists. Skipping creation."
+fi
+
+# Add the user to the docker group if it exists
+if getent group "$DOCKER_GROUP" >/dev/null 2>&1; then
+    if ! getent group "$DOCKER_GROUP" | grep -q "\b$USERNAME\b"; then
+        log_message "Adding user '$USERNAME' to group '$DOCKER_GROUP'."
+        usermod -aG "$DOCKER_GROUP" "$USERNAME"
+        log_message "User '$USERNAME' added to '$DOCKER_GROUP'."
+    else
+        log_message "User '$USERNAME' is already in group '$DOCKER_GROUP'."
+    fi
+else
+    log_message "WARNING: Group '$DOCKER_GROUP' does not exist. The service may not function correctly."
+fi
+
+# --- 3. Manage Configuration ---
+# NOTE: This section is ideally replaced by using a 'conffiles' file.
+# The logic is kept here assuming you are not using conffiles yet.
+log_message "Ensuring config directory '$ETC_RANDAO_DIR' exists."
+mkdir -p "$ETC_RANDAO_DIR"
+chown root:root "$ETC_RANDAO_DIR"
+chmod 700 "$ETC_RANDAO_DIR" # Only root can access the directory listing
+
+TEMPLATE_DIR="$APP_ROOT_DIR/docker-compose/templates"
+
+# Safely copy example config files if they don't already exist
+if [ ! -f "$ETC_RANDAO_DIR/.env" ]; then
+    log_message "Copying example.env to $ETC_RANDAO_DIR/.env."
+    cp "$TEMPLATE_DIR/example.env" "$ETC_RANDAO_DIR/.env"
+fi
+if [ ! -f "$ETC_RANDAO_DIR/wallet.json" ]; then
+    log_message "Copying example.wallet.json to $ETC_RANDAO_DIR/wallet.json."
+    cp "$TEMPLATE_DIR/example.wallet.json" "$ETC_RANDAO_DIR/wallet.json"
+fi
+
+# --- 4. Set Secure Permissions for Configuration Files ---
+# Set permissions on any config file that exists in the directory.
+log_message "Setting ownership and permissions for config files in '$ETC_RANDAO_DIR'."
+if [ -f "$ETC_RANDAO_DIR/.env" ]; then
+    chown root:"$GROUPNAME" "$ETC_RANDAO_DIR/.env"
+    chmod 640 "$ETC_RANDAO_DIR/.env" # root:rw, group:r, other:---
+fi
+if [ -f "$ETC_RANDAO_DIR/wallet.json" ]; then
+    chown root:"$GROUPNAME" "$ETC_RANDAO_DIR/wallet.json"
+    chmod 640 "$ETC_RANDAO_DIR/wallet.json"
+fi
+if [ -f "$ETC_RANDAO_DIR/wallet.seed" ]; then
+    chown root:"$GROUPNAME" "$ETC_RANDAO_DIR/wallet.seed"
+    chmod 640 "$ETC_RANDAO_DIR/wallet.seed"
+fi
+
+log_message "Permissions set. User '$USERNAME' (in group '$GROUPNAME') has read-access to configs."
+log_message "IMPORTANT: Remember to edit configuration in /etc/randao/ with your actual secrets."
+
+# --- 5. Enable and Start Systemd Units ---
+# NOTE: This section is ideally removed in favor of deb-helper in debian/rules.
+# The logic is kept here assuming you are not using deb-helper yet.
+log_message "Reloading systemd daemon, then enabling and starting randao.timer."
+systemctl daemon-reload
+systemctl enable randao.timer
+systemctl start --no-block randao.timer
+log_message "Systemd randao.timer has been enabled and started."
+
+
+log_message "Randao Provider post-installation script finished."
+
+exit 0

@@ -1,0 +1,30 @@
+# /home/randao/RandaoProvider/docker-compose/docker-compose.appliance.yml
+# This file contains overrides specific to the appliance deployment.
+# It should be loaded AFTER the base docker-compose.yml.
+
+services:
+  orchestrator:
+    volumes:
+      # Override wallet mounts to point to /etc/randao/ for appliance security
+      # This explicitly mounts wallet.json from /etc/randao/
+      - /etc/randao/wallet.json:/app/config/wallet.json:ro
+      # This explicitly mounts wallet.seed from /etc/randao/ (if used)
+      - /etc/randao/wallet.seed:/app/config/wallet.seed:ro
+    deploy: # Appliance-specific deploy rules
+      resources:
+        limits:
+          cpus: '2.0'   # Allow orchestrator up to 1.5 cores
+          memory: 300M  # Allow up to 300MB RAM
+        reservations:
+          cpus: '1.0'   # Reserve 0.5 of a core
+          memory: 192M
+
+  postgres: # Appliance-specific deploy rules for Postgres
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'   # Limit Postgres to 40% of one core
+          memory: 150M  # Limit Postgres to 150MB RAM
+        reservations:
+          cpus: '0.4'   # Reserve 10% of one core
+          memory: 64M

@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+# This block overrides the default 'dh_auto_configure' step.
+# It tells deb-helper to run the 'configure' script but with
+# an extra option. After this step, the normal sequence continues.
+override_dh_auto_configure:
+	dh_auto_configure -- --with-extra-feature
