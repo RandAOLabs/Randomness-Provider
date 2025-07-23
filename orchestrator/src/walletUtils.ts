@@ -1,6 +1,5 @@
-import { getKeyPairFromMnemonic } from "human-crypto-keys"; // <-- updated import 
+import { getKeyPairFromSeed } from "human-crypto-keys";
 import type { JWKInterface } from "arweave/web/lib/wallet";
-import { webcrypto } from 'crypto';
 import { passwordStrength } from "check-password-strength";
 import { isOneOf, isString } from "typed-assert";
 import { wordlists, mnemonicToSeed } from "bip39-web-crypto";
@@ -10,17 +9,17 @@ import * as fs from 'fs/promises';
 
 // --- Configuration ---
 
-// Externalize Arweave configuration for flexibility.
+// ⭐ Recommendation: Externalize Arweave configuration for flexibility.
 const arweave = Arweave.init({
   host: process.env.ARWEAVE_HOST || "arweave.net",
   port: process.env.ARWEAVE_PORT ? parseInt(process.env.ARWEAVE_PORT, 10) : 443,
   protocol: process.env.ARWEAVE_PROTOCOL || "https",
 });
 
-// Avoid "magic numbers" by defining as constants.
+// ⭐ Recommendation: Avoid magic numbers by defining them as constants.
 const STRONG_PASSWORD_LEVEL = 3; // Corresponds to 'Strong' in check-password-strength
 
-// Create a Set for efficient mnemonic validation (O(1) lookup).
+// ⭐ Recommendation: Create a Set for efficient mnemonic validation (O(1) lookup).
 const englishWordlistSet = new Set(wordlists.english);
 
 
@@ -30,25 +29,31 @@ let walletSource: 'seed_file' | 'json_file' | 'seed_phrase' | 'json_string' | nu
 
 
 // --- Core Crypto Functions ---
+
 /**
- * Generate a JWK from a mnemonic seedphrase using the direct method.
+ * Generate a JWK from a mnemonic seedphrase.
  *
  * @param mnemonic Mnemonic seedphrase to generate wallet from.
  * @returns Wallet JWK.
  */
 export async function jwkFromMnemonic(mnemonic: string): Promise<JWKInterface> {
-  // Directly generate the key pair from the mnemonic string.
-  const { privateKey } = await getKeyPairFromMnemonic(
-    mnemonic,
-    {
-      id: "rsa",
-      modulusLength: 4096,
-    },
+  // TODO: As noted in the original code, this should be replaced.
+  // Use `getKeyPairFromMnemonic` from `human-crypto-keys` for a more direct and efficient implementation.
+  // See: https://www.notion.so/community-labs/Human-Crypto-Keys-reported-Bug-d3a8910dabb6460da814def62665181a
+
+  const seedBuffer = await mnemonicToSeed(mnemonic);
+
+  // Recommendation: Investigate and fix the need for @ts-ignore.
+  // The type of `seedBuffer` (likely Uint8Array) might differ from what `getKeyPairFromSeed` expects in Node.js (e.g., a Buffer).
+  // A potential fix could be `Buffer.from(seedBuffer)`.
+  const { privateKey } = await getKeyPairFromSeed(
+    //@ts-ignore
+    seedBuffer,
+    { id: "rsa", modulusLength: 4096 },
     { privateKeyFormat: "pkcs8-der" },
   );
 
-  // Convert the resulting PKCS8 key to the JWK format.
-  // TODO: The `as any` cast should be investigated to improve type safety.
+  // Recommendation: Investigate and fix the need for `as any`.
   const jwk = await pkcs8ToJwk(privateKey as any);
 
   return jwk;
@@ -81,31 +86,6 @@ export async function pkcs8ToJwk(privateKey: Uint8Array): Promise<JWKInterface> 
     dp: jwk.dp, dq: jwk.dq, qi: jwk.qi,
   };
 }
-// * IF Arweave's JWKInterface IS compatible with the standard JsonWebKey type.  */ 
-// /**
-//  * Convert a PKCS8 private key to a JWK
-//  *
-//  * @param privateKey PKCS8 private key to convert
-//  * @returns JWK
-//  */
-// export async function pkcs8ToJwk(privateKey: Uint8Array): Promise<JWKInterface> {
-//   const key = await webcrypto.subtle.importKey(
-//     "pkcs8",
-//     privateKey,
-//     { name: "RSA-PSS", hash: "SHA-256" },
-//     true,
-//     ["sign"]
-//   );
-
-//   const jwk = await webcrypto.subtle.exportKey("jwk", key);
-
-//   // Simply return the jwk object directly. TypeScript will ensure it matches
-//   // the 'JWKInterface' return type. This is cleaner and more maintainable.
-//   return jwk;
-// }
-
-
-
 
 // --- Validation Functions ---
 
@@ -147,7 +127,9 @@ export function isValidMnemonic(mnemonic: string): boolean {
 // --- Wallet Initialization & Access ---
 
 /**
+ * ⭐ Recommendation: Refactored `initializeWallet`.
  * Initializes the global wallet by trying a series of sources in a defined order of priority.
+ * This approach is more modular and easier to maintain.
  *
  * @returns JWK wallet object.
  */
@@ -206,13 +188,13 @@ export async function initializeWallet(): Promise<JWKInterface> {
         return JSON.parse(jsonString);
       },
     },
-  ];
+  ] as const; // <--- This 'as const' is critical for type inference
 
   for (const source of sources) {
     if (source.enabled) {
       logger.debug(`[DEBUG] Checking wallet source: ${source.type.toUpperCase()}`);
       try {
-        const wallet = await source.load();
+        const wallet = await source.load(); // wallet is JWKInterface
         const address = await arweave.wallets.jwkToAddress(wallet);
 
         logger.info(`Wallet initialized from ${source.type.toUpperCase()} with address: ${address}`);
@@ -220,9 +202,11 @@ export async function initializeWallet(): Promise<JWKInterface> {
           logger.info(`Wallet source path: ${source.path}`);
         }
 
-        globalWallet = wallet;
-        walletSource = source.type;
-        return globalWallet; // Exit early if successful
+        globalWallet = wallet; // Assign to globalWallet for future calls
+        walletSource = source.type; // This assignment is now type-safe due to 'as const'
+
+        return wallet; // <--- Directly return 'wallet' which is guaranteed JWKInterface
+
       } catch (error) {
         logger.error(`Failed to load wallet from ${source.type.toUpperCase()} (${source.path || 'no path specified'}): ${error instanceof Error ? error.message : String(error)}`);
         logger.debug(`[DEBUG] Full error details for ${source.type.toUpperCase()}:`, error);
@@ -233,79 +217,10 @@ export async function initializeWallet(): Promise<JWKInterface> {
     }
   }
 
+  // If the loop completes without successfully returning a wallet,
+  // then we throw an error as no wallet could be initialized.
   throw new Error("No wallet configuration could be successfully initialized from any source. Please check environment variables and file paths.");
 }
-
-
-
-// old initialize
-// export async function initializeWallet(): Promise<JWKInterface> {
-//   if (globalWallet) {
-//     return globalWallet;
-//   }
-
-//   // * Define wallet sources in order of priority.
-//   // 1. seed file (location indicated in docker-compose.yml)
-//   // 2. wallet.json file (location indicated in docker-compose.yml
-//   // 3. seed phrase in .env
-//   // 4. wallet.json in .env
-//   const sources = [
-//     {
-//       type: 'seed_file',
-//       path: process.env.SEED_FILE_PATH,
-//       enabled: !!process.env.SEED_FILE_PATH,
-//       load: async () => {
-//         const seed = await fs.readFile(process.env.SEED_FILE_PATH!, 'utf8');
-//         if (!isValidMnemonic(seed)) throw new Error("Invalid mnemonic format in file.");
-//         return jwkFromMnemonic(seed.trim());
-//       },
-//     },
-//     {
-//       type: 'json_file',
-//       path: process.env.WALLET_JSON_FILE_PATH,
-//       enabled: !!process.env.WALLET_JSON_FILE_PATH,
-//       load: async () => JSON.parse(await fs.readFile(process.env.WALLET_JSON_FILE_PATH!, 'utf8')),
-//     },
-//     {
-//       type: 'seed_phrase',
-//       path: "env var",
-//       enabled: !!process.env.SEED_PHRASE,
-//       load: async () => {
-//         const seed = process.env.SEED_PHRASE!;
-//         if (!isValidMnemonic(seed)) throw new Error("Invalid mnemonic format in env var.");
-//         return jwkFromMnemonic(seed.trim());
-//       },
-//     },
-//     {
-//       type: 'json_string',
-//       path: "env var",
-//       enabled: !!process.env.WALLET_JSON,
-//       load: async () => JSON.parse(process.env.WALLET_JSON!),
-//     },
-//   ];
-
-//   for (const source of sources) {
-//     if (source.enabled) {
-//       try {
-//         const wallet = await source.load();
-//         const address = await arweave.wallets.jwkToAddress(wallet);
-
-//         logger.info(`Wallet initialized from ${source.type.toUpperCase()} (${source.path})`);
-//         logger.info(`Wallet address: ${address}`);
-
-//         globalWallet = wallet;
-//         walletSource = source.type;
-//         return globalWallet;
-//       } catch (error) {
-//         logger.error(`Failed to load wallet from ${source.type.toUpperCase()} (${source.path})`, error);
-//         // Fall through to the next source.
-//       }
-//     }
-//   }
-
-//   throw new Error("No wallet configuration could be successfully initialized. Please check environment variables and file paths.");
-// }
-
 
 /**
  * Get the initialized wallet's address.
