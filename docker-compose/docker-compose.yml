@@ -28,9 +28,6 @@ services:
 
   orchestrator:
     image: hottoddie/orchestrator:custom-file-wallet # Or your chosen stable tag (e.g., appliance-stable)
-    # build:
-    #   context: ../orchestrator/
-    #   dockerfile: Dockerfile
     pull_policy: always
     depends_on:
       postgres:

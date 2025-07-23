@@ -1,7 +1,3 @@
-Here's the updated Markdown document, including an explanation of why using `wallet.json` or `wallet.seed` files is preferred.
-
------
-
 # Randao Provider Configuration Guide
 
 This document outlines how to deploy the Randao Provider application using Docker Compose, covering configurations for both standard user environments (e.g., Windows, macOS, Linux desktop) and dedicated Linux service/appliance environments.
