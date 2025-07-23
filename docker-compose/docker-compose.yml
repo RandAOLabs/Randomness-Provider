@@ -1,7 +1,4 @@
 # /home/randao/RandaoProvider/docker-compose/docker-compose.yml (Base)
-# This file defines the core services and their common configuration.
-# It uses relative paths for secrets, suitable for standalone/dev environments.
-
 services:
   postgres:
     image: postgres:13-alpine
@@ -15,7 +12,7 @@ services:
       - backend
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro # Relative path for custom Postgres config
+      # REMOVED: - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-myuser} -d ${DB_NAME:-mydatabase}"]
       interval: 10s
@@ -26,10 +23,15 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
-    shm_size: '64m'
+    # REMOVED: shm_size: '64m' - Docker's default shm_size (64MB) will be used
+    # REMOVED: NO deploy section here; no device-specific limits in the base file.
 
   orchestrator:
-    image: randao/orchestrator:latest # Or your chosen stable tag (e.g., appliance-stable)
+    image: hottoddie/orchestrator:custom-file-wallet # Or your chosen stable tag (e.g., appliance-stable)
+    # build:
+    #   context: ../orchestrator/
+    #   dockerfile: Dockerfile
+    pull_policy: always
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,24 +41,16 @@ services:
       DB_USER: ${DB_USER:-myuser}
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
-      # New environment variables to point to the wallet files INSIDE the container
-      # The app code will prioritize these if the files are mounted and readable.
-      WALLET_JSON_FILE_PATH: /app/config/wallet.json # For JWK JSON wallet. container path after the volume is mounted (see 'volumes:' below)
-      SEED_FILE_PATH: /app/config/wallet.seed       # For mnemonic seed phrase. container path after the volume is mounted (see 'volumes:' below)
-      # WALLET_JSON is passed. If WALLET_JSON_FILE_PATH fails/is missing, app falls back to this.
+      WALLET_JSON_FILE_PATH: /app/config/wallet.json
+      SEED_FILE_PATH: /app/config/wallet.seed
       WALLET_JSON: ${WALLET_JSON}
-      SEED_PHRASE: ${SEED_PHRASE} # Pass if you want to support seed phrase env var too
       DOCKER_NETWORK: backend
     networks:
       - backend
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock # Common Docker socket mount
-      # Mount wallet files from the project directory for standalone/dev
-      # If ./wallet.json doesn't exist, Docker will create an empty dir,
-      # but the app will fallback to WALLET_JSON env var if set.
-      # One of these is preferred for toaster/appliance approach (we could move them to the appliance yaml)
-      - ./wallet.json:/app/config/wallet.json:ro  # Read-only mount for JWK file (optional, if used)
-      - ./wallet.seed:/app/config/wallet.seed:ro  # Read-only mount for seed phrase file (optional, if used)
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./wallet.json:/app/config/wallet.json # Default/Standalone wallet.json mount
+      - ./wallet.seed:/app/config/wallet.seed # Default/Standalone wallet.seed mount
     logging:
       driver: json-file
       options:

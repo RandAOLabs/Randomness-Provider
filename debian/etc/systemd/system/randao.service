@@ -11,7 +11,8 @@ Type=simple
 User=randao_service
 Group=randao_service
 WorkingDirectory=/home/randao/RandaoProvider/docker-compose
-ExecStart=/usr/bin/docker compose --env-file /etc/randao/.env up --pull=always
+#ExecStart=/usr/bin/docker compose --env-file /etc/randao/.env up --pull=always
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.appliance.yml --env-file /etc/randao/.env up --pull=always
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=0
 Restart=on-failure
