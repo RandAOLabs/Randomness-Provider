@@ -54,7 +54,8 @@ services:
       # Mount wallet files from the project directory for standalone/dev
       # If ./wallet.json doesn't exist, Docker will create an empty dir,
       # but the app will fallback to WALLET_JSON env var if set.
-      - ./wallet.json:/app/config/wallet.json:ro  # Read-only mount for JWK file
+      # One of these is preferred for toaster/appliance approach (we could move them to the appliance yaml)
+      - ./wallet.json:/app/config/wallet.json:ro  # Read-only mount for JWK file (optional, if used)
       - ./wallet.seed:/app/config/wallet.seed:ro  # Read-only mount for seed phrase file (optional, if used)
     logging:
       driver: json-file
