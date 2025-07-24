@@ -1,0 +1,15 @@
+# Source files from your Git repo (relative to repo root)  
+# Destination on target system (relative to /)
+
+# Systemd service and timer files
+debian/etc/systemd/system/randao.service        /etc/systemd/system/
+debian/etc/systemd/system/randao.timer          /etc/systemd/system/
+debian/etc/update-motd.d/66-randao              /etc/update-motd.d/66-randao
+
+# Docker Compose project files
+docker-compose/                                 /opt/randao-provider/
+orchestrator/                                   /opt/randao-provider/
+puzzle-generator/                             /opt/randao-provider/
+requester/                                    /opt/randao-provider/
+LICENSE                                       /opt/randao-provider/
+README.md                                     /opt/randao-provider/

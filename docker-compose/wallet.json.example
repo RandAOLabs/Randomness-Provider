@@ -1,0 +1,11 @@
+{
+  "kty": "RSA",
+  "e": "AQAB",
+  "n": "zxP9Y4b1... (truncated for brevity)...eB8zP6Q",
+  "d": "Jk-9sR1b... (truncated for brevity)...k_1gQ2",
+  "p": "9h7x0zY0... (truncated for brevity)...wD4q",
+  "q": "8x6w9yZ8... (truncated for brevity)...vH9k",
+  "dp": "2o1p3q4r... (truncated for brevity)...sU5t",
+  "dq": "5t6u7v8w... (truncated for brevity)...xB9y",
+  "qi": "1a2b3c4d... (truncated for brevity)...gF0h"
+}

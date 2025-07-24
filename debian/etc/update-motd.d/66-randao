@@ -1,0 +1,59 @@
+#!/bin/bash
+THIS_SCRIPT="randao"
+MOTD_DISABLE=""
+
+[[ -f /etc/default/armbian-motd ]] && . /etc/default/armbian-motd
+
+for f in $MOTD_DISABLE; do
+	[[ $f == $THIS_SCRIPT ]] && exit 0
+done
+
+## FORMATTING VARIABLES
+# --- ANSI Color Codes ---
+RED=$'\e[31m'
+GREEN=$'\e[32m'
+BLUE=$'\e[94m'
+YELLOW=$'\e[93m'
+GOLD=$'\e[38;5;214m'
+ORANGE=$'\e[38;5;208m'
+MAGENTA=$'\e[35m'
+CYAN=$'\e[36m'
+
+# if using color with effects, use color first and then the effect. The color codes above reset the effect to none.
+BOLD=$'\e[1m' # bold 
+ITAL=$'\e[3m' # italics
+ULINE=$'\e[4m' # underline
+XOUT=$'\e[9m' # crossed out
+REV=$'\e[7m' # reversed
+NC=$'\e[0m' # No Color (resets to default)
+
+
+#servicelist=("randao.service" "randao.timer")
+servicelist=("randao.timer")
+
+for service in "${servicelist[@]}"; do
+	if [[ -f "/etc/systemd/system/${service}" ]]; then
+		serviceEnabled=$(systemctl is-enabled $service)
+		if [[ ${serviceEnabled} == "enabled" ]]; then
+			serviceEnabled="${BOLD}${GREEN}enabled${NC}"
+            		serviceMessage=""
+		else
+			serviceEnabled="${BOLD}${YELLOW}disabled${NC}"
+            		serviceMessage="To enable ${BOLD}${service}${NC}: sudo systemctl enable ${service}"
+        	fi
+
+        	serviceActive=$(systemctl is-active $service)
+		if [[ ${serviceActive} == "active" ]]; then
+			# service is active
+			serviceActive="${BOLD}${GREEN}active${NC}"
+		            serviceMessage+=""
+		else
+			# service is in-active
+			serviceActive="${BOLD}${YELLOW}inactive${NC}"
+		        serviceMessage+="\nThen start ${BOLD}${service}${NC}: sudo systemctl start ${service}"
+        fi
+
+		echo -e "${BOLD}${service} is $serviceEnabled and $serviceActive."
+		echo -e "${serviceMessage}\n"
+    fi
+done

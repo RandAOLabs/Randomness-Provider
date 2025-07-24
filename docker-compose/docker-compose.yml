@@ -1,3 +1,4 @@
+# /home/randao/RandaoProvider/docker-compose/docker-compose.yml (Base)
 services:
   postgres:
     image: postgres:13-alpine
@@ -11,6 +12,7 @@ services:
       - backend
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # REMOVED: - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-myuser} -d ${DB_NAME:-mydatabase}"]
       interval: 10s
@@ -21,11 +23,12 @@ services:
       options:
         max-size: "100m"
         max-file: "5"
+    # REMOVED: shm_size: '64m' - Docker's default shm_size (64MB) will be used
+    # REMOVED: NO deploy section here; no device-specific limits in the base file.
 
   orchestrator:
-    image: randao/orchestrator:latest
-    # pull_policy: always  # Ensure the latest image is always pulled
-    restart: unless-stopped  # Restart on crash (or on exit with non-zero code)
+    image: hottoddie/orchestrator:custom-file-wallet # Or your chosen stable tag (e.g., appliance-stable)
+    pull_policy: always
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,13 +38,16 @@ services:
       DB_USER: ${DB_USER:-myuser}
       DB_PASSWORD: ${DB_PASSWORD:-mypassword}
       DB_NAME: ${DB_NAME:-mydatabase}
-      SEED_PHRASE: ${SEED_PHRASE}
+      WALLET_JSON_FILE_PATH: /app/config/wallet.json
+      SEED_FILE_PATH: /app/config/wallet.seed
       WALLET_JSON: ${WALLET_JSON}
       DOCKER_NETWORK: backend
     networks:
       - backend
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./wallet.json:/app/config/wallet.json # Default/Standalone wallet.json mount
+      - ./wallet.seed:/app/config/wallet.seed # Default/Standalone wallet.seed mount
     logging:
       driver: json-file
       options:

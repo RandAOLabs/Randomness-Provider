@@ -1,0 +1,22 @@
+Description=Timer to periodically restart RANDAO Provider for latest image pull
+#Requires=randao.service
+#After=randao.service
+
+[Timer]
+# Restart every day at a random time within the first hour of the day
+# OnCalendar=daily
+# RandomizedDelaySec=1h
+# Persistent=true
+
+# OR, restart every 12 hours (e.g., 00:00, 12:00) with a random delay
+OnCalendar=*-*-* 00,12:00:00
+RandomizedDelaySec=30min
+Persistent=true
+
+# OR, restart every 8 hours from when the service last became active
+#OnUnitActiveSec=8h
+#RandomizedDelaySec=30min
+#AccuracySec=1min # Optional: Reduce timer inaccuracy from default (often 1min)
+
+[Install]
+WantedBy=timers.target

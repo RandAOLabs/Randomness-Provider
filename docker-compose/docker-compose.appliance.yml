@@ -1,0 +1,28 @@
+# /home/randao/Randomness-Provider.git/docker-compose/docker-compose.appliance.yml
+services:
+  orchestrator:
+    volumes:
+      # Override wallet mounts to point to /etc/randao/ for appliance security
+      - /etc/randao/wallet.json:/app/config/wallet.json:ro
+      - /etc/randao/wallet.seed:/app/config/wallet.seed:ro # If used
+    deploy: # Appliance-specific orchestrator deploy rules
+      resources:
+        limits:
+          cpus: '1.5'   # Allow orchestrator up to 1.5 cores
+          memory: 300M  # Allow up to 300MB RAM
+        reservations:
+          cpus: '0.5'   # Reserve 0.5 of a core
+          memory: 192M
+
+  postgres: # Appliance-specific postgres deploy rules and config mount
+    volumes:
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro # <--- ADDED HERE
+    shm_size: '64m' # <--- ADDED HERE (or adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.4'   # Limit Postgres to 40% of one core
+          memory: 150M  # Limit Postgres to 150MB RAM
+        reservations:
+          cpus: '0.1'   # Reserve 10% of one core
+          memory: 64M

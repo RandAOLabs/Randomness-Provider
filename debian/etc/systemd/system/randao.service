@@ -1,0 +1,22 @@
+[Unit]
+Description=RANDAO Provider
+# When running manually, use the --no-block flag:
+# 	systemctl start --no-block randao.service
+Requires=docker.service
+After=docker.service
+#Wants-randao.timer
+
+[Service]
+Type=simple
+User=randao_service
+Group=randao_service
+WorkingDirectory=/home/randao/RandaoProvider/docker-compose
+#ExecStart=/usr/bin/docker compose --env-file /etc/randao/.env up --pull=always
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.appliance.yml --env-file /etc/randao/.env up --pull=always
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
