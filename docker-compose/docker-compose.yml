@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:13-alpine
+    restart: unless-stopped  # Restart on crash (or on exit with non-zero code)
     environment:
       POSTGRES_USER: ${DB_USER:-myuser}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-mypassword}
@@ -24,7 +25,7 @@ services:
 
   orchestrator:
     image: randao/orchestrator:latest
-    # pull_policy: always  # Ensure the latest image is always pulled
+    pull_policy: always  # Ensure the latest image is always pulled
     restart: unless-stopped  # Restart on crash (or on exit with non-zero code)
     depends_on:
       postgres:
