@@ -126,13 +126,23 @@ export function isValidMnemonic(mnemonic: string): number {
  * Creates or appends to .env file in docker-compose directory
  */
 export async function ensureWalletConfiguration(): Promise<void> {
+    logger.debug("=== WALLET CONFIGURATION DEBUG ===");
+    logger.debug(`Raw SEED_PHRASE env var: '${process.env.SEED_PHRASE}'`);
+    logger.debug(`Raw WALLET_JSON env var: '${process.env.WALLET_JSON}'`);
+    
     const hasSeedPhrase = !!process.env.SEED_PHRASE && 
         process.env.SEED_PHRASE !== "Create a NEW wallet and enter the 12 - 24 words here";
     const hasWalletJson = !!process.env.WALLET_JSON;
+    
+    logger.debug(`hasSeedPhrase: ${hasSeedPhrase}`);
+    logger.debug(`hasWalletJson: ${hasWalletJson}`);
 
     // If either configuration exists in environment variables, we're good
     if (hasSeedPhrase || hasWalletJson) {
         logger.info("Wallet configuration found in environment variables");
+        if (hasSeedPhrase) {
+            logger.debug(`Using SEED_PHRASE with ${process.env.SEED_PHRASE!.split(' ').length} words`);
+        }
         return;
     }
 
@@ -210,9 +220,20 @@ export async function ensureWalletConfiguration(): Promise<void> {
  * @returns JWK wallet object
  */
 export async function initializeWallet(): Promise<JWKInterface> {
+  logger.debug("=== WALLET INITIALIZATION DEBUG ===");
+  
   // If wallet is already initialized, return it
   if (globalWallet) {
+    logger.debug("Using cached global wallet");
     return globalWallet;
+  }
+
+  logger.debug(`SEED_PHRASE present: ${!!process.env.SEED_PHRASE}`);
+  logger.debug(`WALLET_JSON present: ${!!process.env.WALLET_JSON}`);
+  if (process.env.SEED_PHRASE) {
+    logger.debug(`SEED_PHRASE length: ${process.env.SEED_PHRASE.length} chars`);
+    logger.debug(`SEED_PHRASE word count: ${process.env.SEED_PHRASE.split(' ').length}`);
+    logger.debug(`SEED_PHRASE first 20 chars: '${process.env.SEED_PHRASE.substring(0, 20)}...'`);
   }
 
   const hasSeedPhrase = !!process.env.SEED_PHRASE;
@@ -221,6 +242,7 @@ export async function initializeWallet(): Promise<JWKInterface> {
   if (hasSeedPhrase && hasWalletJson) {
     logger.info("Both SEED_PHRASE and WALLET_JSON are provided. Prioritizing SEED_PHRASE.");
   } else if (!hasSeedPhrase && !hasWalletJson) {
+    logger.error("No wallet configuration found in initializeWallet!");
     throw new Error("No wallet configuration found. Please provide either SEED_PHRASE or WALLET_JSON in environment variables.");
   }
 
@@ -232,12 +254,23 @@ export async function initializeWallet(): Promise<JWKInterface> {
   if (hasSeedPhrase) {
     try {
       const seedPhrase = process.env.SEED_PHRASE!;
-      if (!isValidMnemonic(seedPhrase)) {
+      logger.debug(`Attempting to validate seed phrase: '${seedPhrase.substring(0, 20)}...'`);
+      logger.debug(`Seed phrase word count: ${seedPhrase.split(' ').length}`);
+      
+      const validationResult = isValidMnemonic(seedPhrase);
+      logger.debug(`Seed phrase validation result: ${validationResult}`);
+      
+      if (!validationResult) {
+        logger.error(`Invalid seed phrase format! Phrase: '${seedPhrase}'`);
         throw new Error("Invalid seed phrase format");
       }
       
+      logger.debug("Creating JWK from mnemonic...");
       wallet = await jwkFromMnemonic(seedPhrase);
+      logger.debug("JWK creation successful, generating address...");
+      
       seedPhraseAddress = await arweave.wallets.jwkToAddress(wallet);
+      logger.debug(`Generated wallet address: ${seedPhraseAddress}`);
       
       // If we have both, also get the JSON wallet address for comparison
       if (hasWalletJson) {
