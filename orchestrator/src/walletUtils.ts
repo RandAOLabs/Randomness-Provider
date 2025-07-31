@@ -3,6 +3,9 @@ import type { JWKInterface } from "arweave/web/lib/wallet";
 import { passwordStrength } from "check-password-strength";
 import { isOneOf, isString } from "typed-assert";
 import { wordlists, mnemonicToSeed } from "bip39-web-crypto";
+import { generateMnemonic, validateMnemonic } from 'bip39';
+import * as fs from 'fs';
+import * as path from 'path';
 import logger from "./logger";
 import Arweave from "arweave";
 
@@ -116,6 +119,71 @@ export function isValidMnemonic(mnemonic: string): number {
   }
 
   return words.length;
+}
+
+/**
+ * Check for missing wallet configuration and generate seed phrase if needed
+ * Creates or appends to .env file in docker-compose directory
+ */
+export async function ensureWalletConfiguration(): Promise<void> {
+    const hasSeedPhrase = !!process.env.SEED_PHRASE && 
+        process.env.SEED_PHRASE !== "Create a NEW wallet and enter the 12 - 24 words here";
+    const hasWalletJson = !!process.env.WALLET_JSON;
+
+    // If either configuration exists, we're good
+    if (hasSeedPhrase || hasWalletJson) {
+        logger.info("Wallet configuration found in environment variables");
+        return;
+    }
+
+    logger.info("No wallet configuration found. Generating new BIP39 seed phrase...");
+
+    try {
+        // Generate a 12-word BIP39-compliant mnemonic
+        const mnemonic = generateMnemonic(128); // 128 bits = 12 words
+        
+        // Validate the generated mnemonic
+        if (!validateMnemonic(mnemonic)) {
+            throw new Error("Generated mnemonic failed validation");
+        }
+
+        logger.info(`Generated new 12-word seed phrase: ${mnemonic.split(' ').length} words`);
+        logger.debug(`Seed phrase: ${mnemonic}`);
+
+        // Determine the .env file path (in docker-compose directory)
+        const envPath = path.join(process.cwd(), '..', 'docker-compose', '.env');
+        
+        // Prepare the seed phrase entry
+        const seedPhraseEntry = `SEED_PHRASE="${mnemonic}"`;
+        
+        // Check if .env file exists
+        let envContent = '';
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+            logger.info("Found existing .env file, appending seed phrase");
+        } else {
+            logger.info("Creating new .env file with seed phrase");
+            // Ensure the directory exists
+            const envDir = path.dirname(envPath);
+            if (!fs.existsSync(envDir)) {
+                fs.mkdirSync(envDir, { recursive: true });
+            }
+        }
+
+        // Append the seed phrase to the file
+        const newContent = envContent + (envContent && !envContent.endsWith('\n') ? '\n' : '') + seedPhraseEntry + '\n';
+        fs.writeFileSync(envPath, newContent, 'utf8');
+        
+        // Set the environment variable for the current process
+        process.env.SEED_PHRASE = mnemonic;
+        
+        logger.info(`Seed phrase saved to ${envPath}`);
+        logger.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
+        
+    } catch (error) {
+        logger.error("Failed to generate or save seed phrase:", error);
+        throw new Error(`Wallet configuration setup failed: ${error}`);
+    }
 }
 
 /**

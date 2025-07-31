@@ -1,7 +1,7 @@
 import Docker from 'dockerode';
 import { connectWithRetry, setupDatabase } from './db_tools.js';
 import Arweave from "arweave";
-import { getWalletAddress } from "./walletUtils";
+import { getWalletAddress, ensureWalletConfiguration } from "./walletUtils";
 import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
@@ -142,6 +142,10 @@ async function polling(client: any) {
 // Main function
 async function run(): Promise<void> {
     logger.info("Orchestrator starting up");
+    
+    // Ensure wallet configuration exists, generate if needed
+    await ensureWalletConfiguration();
+    
     logger.debug("Environment variables loaded, initializing services");
 
     const client = await connectWithRetry();
