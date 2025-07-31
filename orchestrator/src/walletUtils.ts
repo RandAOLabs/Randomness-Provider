@@ -130,10 +130,31 @@ export async function ensureWalletConfiguration(): Promise<void> {
         process.env.SEED_PHRASE !== "Create a NEW wallet and enter the 12 - 24 words here";
     const hasWalletJson = !!process.env.WALLET_JSON;
 
-    // If either configuration exists, we're good
+    // If either configuration exists in environment variables, we're good
     if (hasSeedPhrase || hasWalletJson) {
         logger.info("Wallet configuration found in environment variables");
         return;
+    }
+
+    // Fallback: Check if seed phrase exists in the mounted .env file
+    const envPath = path.join('/host-compose', '.env');
+    if (fs.existsSync(envPath)) {
+        try {
+            const envContent = fs.readFileSync(envPath, 'utf8');
+            const seedPhraseMatch = envContent.match(/^SEED_PHRASE="(.+)"$/m);
+            
+            if (seedPhraseMatch && seedPhraseMatch[1]) {
+                const existingSeedPhrase = seedPhraseMatch[1];
+                if (existingSeedPhrase !== "Create a NEW wallet and enter the 12 - 24 words here") {
+                    logger.info("Found existing seed phrase in mounted .env file, using it");
+                    // Set the environment variable for the current process
+                    process.env.SEED_PHRASE = existingSeedPhrase;
+                    return;
+                }
+            }
+        } catch (error) {
+            logger.warn("Failed to read existing .env file:", error);
+        }
     }
 
     logger.info("No wallet configuration found. Generating new BIP39 seed phrase...");
@@ -169,12 +190,12 @@ export async function ensureWalletConfiguration(): Promise<void> {
         const newContent = envContent + (envContent && !envContent.endsWith('\n') ? '\n' : '') + seedPhraseEntry + '\n';
         fs.writeFileSync(envPath, newContent, 'utf8');
         
+        // Set the environment variable for the current process
+        process.env.SEED_PHRASE = mnemonic;
+        
         logger.info(`Seed phrase saved to ${envPath}`);
         logger.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
-        logger.info("Exiting process so Docker can restart with new environment variables...");
-        
-        // Exit the process so Docker can restart it and pick up the new .env file
-        process.exit(0);
+        logger.info("New seed phrase generated and loaded, continuing with startup...");
         
     } catch (error) {
         logger.error("Failed to generate or save seed phrase:", error);
