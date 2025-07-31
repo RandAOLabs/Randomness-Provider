@@ -150,8 +150,8 @@ export async function ensureWalletConfiguration(): Promise<void> {
         logger.info(`Generated new 12-word seed phrase: ${mnemonic.split(' ').length} words`);
         logger.debug(`Seed phrase: ${mnemonic}`);
 
-        // Determine the .env file path (in docker-compose directory)
-        const envPath = path.join(process.cwd(), '..', 'docker-compose', '.env');
+        // Determine the .env file path (relative to current working directory)
+        const envPath = path.join(process.cwd(), '.env');
         
         // Prepare the seed phrase entry
         const seedPhraseEntry = `SEED_PHRASE="${mnemonic}"`;
@@ -163,22 +163,18 @@ export async function ensureWalletConfiguration(): Promise<void> {
             logger.info("Found existing .env file, appending seed phrase");
         } else {
             logger.info("Creating new .env file with seed phrase");
-            // Ensure the directory exists
-            const envDir = path.dirname(envPath);
-            if (!fs.existsSync(envDir)) {
-                fs.mkdirSync(envDir, { recursive: true });
-            }
         }
 
         // Append the seed phrase to the file
         const newContent = envContent + (envContent && !envContent.endsWith('\n') ? '\n' : '') + seedPhraseEntry + '\n';
         fs.writeFileSync(envPath, newContent, 'utf8');
         
-        // Set the environment variable for the current process
-        process.env.SEED_PHRASE = mnemonic;
-        
         logger.info(`Seed phrase saved to ${envPath}`);
         logger.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
+        logger.info("Exiting process so Docker can restart with new environment variables...");
+        
+        // Exit the process so Docker can restart it and pick up the new .env file
+        process.exit(0);
         
     } catch (error) {
         logger.error("Failed to generate or save seed phrase:", error);
