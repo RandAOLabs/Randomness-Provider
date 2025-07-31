@@ -150,8 +150,8 @@ export async function ensureWalletConfiguration(): Promise<void> {
         logger.info(`Generated new 12-word seed phrase: ${mnemonic.split(' ').length} words`);
         logger.debug(`Seed phrase: ${mnemonic}`);
 
-        // Determine the .env file path (relative to current working directory)
-        const envPath = path.join(process.cwd(), '.env');
+        // Determine the .env file path (write to host directory via volume mount)
+        const envPath = path.join('/host-compose', '.env');
         
         // Prepare the seed phrase entry
         const seedPhraseEntry = `SEED_PHRASE="${mnemonic}"`;
