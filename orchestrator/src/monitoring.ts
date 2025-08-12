@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import crypto from 'crypto';
 import logger from './logger';
 import { MonitoringData, PerformanceMetrics, SystemSpecs, ExecutionMetrics, HealthStatus } from 'ao-process-clients';
-import { VERSION } from './app';
+import { VERSION, NETWORK_IP, NETWORK_MODE } from './app';
 
 const execAsync = promisify(exec);
 
@@ -263,6 +263,14 @@ export class MonitoringService {
       executionMetrics,
       health
     };
+
+    // Add optional network monitoring variables if present TODO ADD THESE IN THE MONITORING DATA
+    if (NETWORK_IP) {
+      (monitoringData as any).networkIp = NETWORK_IP;
+    }
+    if (NETWORK_MODE) {
+      (monitoringData as any).networkMode = NETWORK_MODE;
+    }
 
     return monitoringData;
   }

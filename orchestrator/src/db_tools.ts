@@ -81,3 +81,59 @@ export async function connectWithRetry(): Promise<Client> {
     
     throw new Error("Failed to connect to PostgreSQL after multiple attempts");
 }
+
+// Database maintenance function to prevent storage bloat
+export async function performDatabaseMaintenance(client: Client): Promise<void> {
+    try {
+        logger.info("🧹 Starting database maintenance...");
+        
+        // Vacuum analyze to reclaim space and update statistics
+        await client.query('VACUUM ANALYZE time_lock_puzzles;');
+        await client.query('VACUUM ANALYZE rsa_keys;');
+        
+        // Get database size info
+        const sizeResult = await client.query(`
+            SELECT 
+                pg_size_pretty(pg_database_size(current_database())) as db_size,
+                (SELECT count(*) FROM time_lock_puzzles) as puzzle_count,
+                (SELECT count(*) FROM rsa_keys) as key_count
+        `);
+        
+        const { db_size, puzzle_count, key_count } = sizeResult.rows[0];
+        logger.info(`📊 Database maintenance complete - Size: ${db_size}, Puzzles: ${puzzle_count}, Keys: ${key_count}`);
+        
+    } catch (error: any) {
+        logger.error("❌ Error during database maintenance:", error.message);
+    }
+}
+
+// Aggressive cleanup function for storage management
+export async function performAggressiveCleanup(client: Client): Promise<void> {
+    try {
+        logger.info("🗑️ Starting aggressive cleanup for storage management...");
+        
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - (60 * 60 * 1000)); // 1 hour ago
+        
+        // Delete old completed entries more aggressively
+        const deleteResult = await client.query(`
+            DELETE FROM rsa_keys 
+            WHERE id IN (
+                SELECT rsa_id FROM time_lock_puzzles 
+                WHERE detected_completed IS NOT NULL 
+                AND detected_completed < $1
+            )
+        `, [oneHourAgo]);
+        
+        await client.query(`
+            DELETE FROM time_lock_puzzles 
+            WHERE detected_completed IS NOT NULL 
+            AND detected_completed < $1
+        `, [oneHourAgo]);
+        
+        logger.info(`🗑️ Aggressive cleanup complete - Removed ${deleteResult.rowCount || 0} old entries`);
+        
+    } catch (error: any) {
+        logger.error("❌ Error during aggressive cleanup:", error.message);
+    }
+}
