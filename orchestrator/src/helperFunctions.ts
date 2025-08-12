@@ -28,6 +28,8 @@ const requestTimestamps: Map<string, number> = new Map();
 
 let isInitializing = false; // Track if initialization is in progress
 let initPromise: Promise<RandomClient> | null = null; // Store the initialization promise
+let isFirstInitialization = true; // Track if this is the first initialization
+let firstInitializationComplete = false; // Track if first initialization has completed
 
 // Function to reset the ongoingRandomGeneration flag
 export function resetOngoingRandomGeneration() {
@@ -38,56 +40,152 @@ export function resetOngoingRandomGeneration() {
 export async function getRandomClient(): Promise<RandomClient> {
     const currentTime = Date.now();
 
+    // For first initialization, always wait for completion
+    if (isFirstInitialization || !firstInitializationComplete) {
+        logger.info('[RandomClient] First initialization required - awaiting completion');
+        return await initializeRandomClientWithLogging(true);
+    }
+
     // Return the existing instance if it's valid and fresh
     if (randomClientInstance && (currentTime - lastInitTime) <= REINIT_INTERVAL) {
         return randomClientInstance;
     }
 
-    // If reinitialization is already happening, serve the old instance
+    // If reinitialization is already happening, wait for it if it's the first init, otherwise serve old instance
     if (isInitializing) {
-        logger.info('[RandomClient] Reinitialization in progress, serving old instance');
-        return randomClientInstance!;
+        if (initPromise) {
+            logger.info('[RandomClient] Reinitialization in progress - awaiting completion');
+            return await initPromise;
+        } else {
+            logger.info('[RandomClient] Reinitialization in progress, serving old instance');
+            return randomClientInstance!;
+        }
     }
 
-    // Start reinitialization in the background
-    isInitializing = true;
+    // Start reinitialization (background for subsequent inits)
     logger.info('[RandomClient] Background reinitialization triggered');
+    return await initializeRandomClientWithLogging(false);
+}
 
-    (async () => {
+
+/**
+ * Initialize the random client with detailed step-by-step logging
+ * @param awaitCompletion Whether to await completion or run in background
+ * @returns Promise<RandomClient>
+ */
+async function initializeRandomClientWithLogging(awaitCompletion: boolean): Promise<RandomClient> {
+    // If already initializing and we need to await, return the existing promise
+    if (isInitializing && initPromise && awaitCompletion) {
+        logger.info('[RandomClient] Initialization already in progress - awaiting existing promise');
+        return await initPromise;
+    }
+
+    // If already initializing but not awaiting, return old instance
+    if (isInitializing && !awaitCompletion && randomClientInstance) {
+        logger.info('[RandomClient] Initialization in progress - serving old instance');
+        return randomClientInstance;
+    }
+
+    // Start new initialization
+    isInitializing = true;
+    const initStartTime = Date.now();
+    const initType = isFirstInitialization ? 'FIRST' : 'REINIT';
+    
+    logger.info(`[RandomClient] Starting ${initType} initialization...`);
+    
+    const initializationPromise = (async (): Promise<RandomClient> => {
         try {
-            // Use the wallet utilities to get the wallet (prioritizes SEED_PHRASE over WALLET_JSON)
+            // Step 1: Wallet initialization
+            logger.info('[RandomClient] Step 1/4: Initializing wallet configuration...');
+            const stepStart = Date.now();
             const wallet = await getWallet();
+            logger.info(`[RandomClient] Step 1/4: Wallet configuration complete (${Date.now() - stepStart}ms)`);
             
-            const newClient = await (await RandomClient.defaultBuilder())
+            // Step 2: Client builder initialization
+            logger.info('[RandomClient] Step 2/4: Creating RandomClient builder...');
+            const step2Start = Date.now();
+            const builder = await RandomClient.defaultBuilder();
+            logger.info(`[RandomClient] Step 2/4: RandomClient builder created (${Date.now() - step2Start}ms)`);
+            
+            // Step 3: Configuration setup
+            logger.info('[RandomClient] Step 3/4: Configuring client with wallet and AO settings...');
+            const step3Start = Date.now();
+            const configuredBuilder = builder
                 .withWallet(wallet)
                 .withAOConfig({
                     CU_URL: process.env.CU_URL || "https://ur-cu.randao.net",
                     MU_URL: process.env.MU_URL || "https://ur-mu.randao.net",
                     MODE: "legacy" as const
-                })
-                .build();
-
-            // Swap instance only once it's ready
+                });
+            logger.info(`[RandomClient] Step 3/4: Client configuration complete (${Date.now() - step3Start}ms)`);
+            
+            // Step 4: Build and finalize
+            logger.info('[RandomClient] Step 4/4: Building final RandomClient instance...');
+            const step4Start = Date.now();
+            const newClient = await configuredBuilder.build();
+            logger.info(`[RandomClient] Step 4/4: RandomClient build complete (${Date.now() - step4Start}ms)`);
+            
+            // Finalize initialization
             randomClientInstance = newClient;
             lastInitTime = Date.now();
-            logger.info('[RandomClient] Successfully reinitialized client');
+            
+            if (isFirstInitialization) {
+                firstInitializationComplete = true;
+                isFirstInitialization = false;
+                logger.info(`[RandomClient] FIRST initialization completed successfully! Total time: ${Date.now() - initStartTime}ms`);
+            } else {
+                logger.info(`[RandomClient] Reinitialization completed successfully! Total time: ${Date.now() - initStartTime}ms`);
+            }
+            
+            return newClient;
+            
         } catch (err) {
-            logger.error('[RandomClient] Reinitialization failed:', err);
+            const errorMsg = `${initType} initialization failed after ${Date.now() - initStartTime}ms`;
+            logger.error(`[RandomClient] ${errorMsg}:`, err);
+            
+            // If this is first initialization and it failed, we need to retry
+            if (isFirstInitialization) {
+                logger.error('[RandomClient] CRITICAL: First initialization failed - system cannot proceed without random client');
+                throw new Error(`Critical random client initialization failure: ${err}`);
+            }
+            
+            throw err;
         } finally {
             isInitializing = false;
+            initPromise = null;
         }
     })();
-
-    // Return the old instance immediately
-    return randomClientInstance!;
+    
+    // Store the promise for potential awaiting
+    initPromise = initializationPromise;
+    
+    if (awaitCompletion) {
+        return await initializationPromise;
+    } else {
+        // Run in background, return old instance if available
+        initializationPromise.catch(err => {
+            logger.error('[RandomClient] Background initialization failed:', err);
+        });
+        
+        if (randomClientInstance) {
+            return randomClientInstance;
+        } else {
+            // No old instance available, must await
+            logger.warn('[RandomClient] No existing instance available - forcing await of initialization');
+            return await initializationPromise;
+        }
+    }
 }
-
 
 // Add a method to explicitly refresh the client if needed
 export async function refreshRandomClient(): Promise<RandomClient> {
+    logger.info('[RandomClient] Explicit refresh requested');
     randomClientInstance = null;
     lastInitTime = 0;
-    return getRandomClient();
+    isInitializing = false;
+    initPromise = null;
+    // Don't reset first initialization flags - this is just a refresh
+    return await initializeRandomClientWithLogging(true);
 }
 
 // Step 2: Process Challenge Requests (Database selection & assigning is atomic)
