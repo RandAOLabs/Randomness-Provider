@@ -2,7 +2,7 @@ import Docker from 'dockerode';
 import { connectWithRetry, setupDatabase, performDatabaseMaintenance, performAggressiveCleanup } from './db_tools.js';
 import Arweave from "arweave";
 import { getWalletAddress, ensureWalletConfiguration } from "./walletUtils";
-import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown } from './helperFunctions.js';
+import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown, getRandomClient } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
@@ -152,21 +152,38 @@ async function run(): Promise<void> {
     logger.info("Orchestrator starting up");
     
     // Ensure wallet configuration exists, generate if needed
+    logger.info("Step 1/4: Ensuring wallet configuration...");
     await ensureWalletConfiguration();
+    logger.info("Step 1/4: Wallet configuration complete");
     
-    logger.debug("Environment variables loaded, initializing services");
-
+    logger.info("Step 2/4: Initializing database services...");
     const client = await connectWithRetry();
     await setupDatabase(client);
+    logger.info("Step 2/4: Database services initialized");
 
     // Initialize wallet and set provider ID using wallet utilities
-    getWalletAddress().then((address) => {
+    logger.info("Step 3/4: Initializing wallet and provider ID...");
+    try {
+        const address = await getWalletAddress();
         logger.info(`Provider ID: ${address}`);
         PROVIDER_ID = address;
-    }).catch(error => {
+        logger.info("Step 3/4: Wallet and provider ID initialized");
+    } catch (error) {
         logger.error('Failed to initialize wallet:', error);
         process.exit(1);
-    });
+    }
+    
+    // Initialize random client before starting main operations
+    logger.info("Step 4/4: Initializing random client (CRITICAL - must complete before operations)...");
+    try {
+        const randomClient = await getRandomClient();
+        logger.info("Step 4/4: Random client initialization complete - system ready for operations");
+        logger.info("=== ORCHESTRATOR STARTUP COMPLETE ===");
+    } catch (error) {
+        logger.error('CRITICAL: Failed to initialize random client during startup:', error);
+        logger.error('System cannot proceed without random client - shutting down');
+        process.exit(1);
+    }
 
     // Handle graceful shutdown before entering infinite loop
     process.on("SIGTERM", async () => {
