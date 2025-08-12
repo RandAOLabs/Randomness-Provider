@@ -21,6 +21,45 @@ let globalWallet: JWKInterface | null = null;
 let walletSource: 'seed_phrase' | 'json' | null = null;
 
 /**
+ * Update or add a variable to the .env file
+ * @param key Environment variable key
+ * @param value Environment variable value
+ */
+async function updateEnvVariable(key: string, value: string): Promise<void> {
+    try {
+        const envPath = path.join('/host-compose', '.env');
+        let envContent = '';
+        
+        // Read existing content if file exists
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        }
+        
+        // Check if the variable already exists
+        const regex = new RegExp(`^${key}=.*$`, 'm');
+        const newLine = `${key}="${value}"`;
+        
+        if (regex.test(envContent)) {
+            // Replace existing variable
+            envContent = envContent.replace(regex, newLine);
+            logger.debug(`Updated existing ${key} in .env file`);
+        } else {
+            // Add new variable
+            envContent += (envContent && !envContent.endsWith('\n') ? '\n' : '') + newLine + '\n';
+            logger.debug(`Added new ${key} to .env file`);
+        }
+        
+        // Write updated content back to file
+        fs.writeFileSync(envPath, envContent, 'utf8');
+        logger.info(`${key} saved to ${envPath}`);
+        
+    } catch (error) {
+        logger.error(`Failed to update ${key} in .env file:`, error);
+        throw error;
+    }
+}
+
+/**
  * Credits to arweave.app for the mnemonic wallet generation
  *
  * https://github.com/jfbeats/ArweaveWebWallet/blob/master/src/functions/Wallets.ts
@@ -207,6 +246,17 @@ export async function ensureWalletConfiguration(): Promise<void> {
         logger.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
         logger.info("New seed phrase generated and loaded, continuing with startup...");
         
+        // Generate and save the provider ID
+        try {
+            const wallet = await jwkFromMnemonic(mnemonic);
+            const providerId = await arweave.wallets.jwkToAddress(wallet);
+            await updateEnvVariable('PROVIDER_ID', providerId);
+            process.env.PROVIDER_ID = providerId;
+            logger.info(`Provider ID set: ${providerId}`);
+        } catch (error) {
+            logger.error("Failed to generate and save provider ID:", error);
+        }
+        
     } catch (error) {
         logger.error("Failed to generate or save seed phrase:", error);
         throw new Error(`Wallet configuration setup failed: ${error}`);
@@ -286,6 +336,15 @@ export async function initializeWallet(): Promise<JWKInterface> {
       globalWallet = wallet;
       logger.info(`Using wallet from SEED_PHRASE with address: ${seedPhraseAddress}`);
       
+      // Set PROVIDER_ID in .env file
+      try {
+        await updateEnvVariable('PROVIDER_ID', seedPhraseAddress);
+        process.env.PROVIDER_ID = seedPhraseAddress;
+        logger.info(`Provider ID set from seed phrase: ${seedPhraseAddress}`);
+      } catch (error) {
+        logger.error("Failed to save provider ID from seed phrase:", error);
+      }
+      
       if (jsonAddress) {
         logger.info(`WALLET_JSON address (not used): ${jsonAddress}`);
       }
@@ -310,6 +369,15 @@ export async function initializeWallet(): Promise<JWKInterface> {
       walletSource = 'json';
       globalWallet = wallet;
       logger.info(`Using wallet from WALLET_JSON with address: ${jsonAddress}`);
+      
+      // Set PROVIDER_ID in .env file
+      try {
+        await updateEnvVariable('PROVIDER_ID', jsonAddress!);
+        process.env.PROVIDER_ID = jsonAddress!;
+        logger.info(`Provider ID set from wallet JSON: ${jsonAddress}`);
+      } catch (error) {
+        logger.error("Failed to save provider ID from wallet JSON:", error);
+      }
     } catch (error) {
       throw new Error(`Failed to initialize wallet from WALLET_JSON: ${error}`);
     }
