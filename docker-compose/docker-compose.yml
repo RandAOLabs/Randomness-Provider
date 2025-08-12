@@ -20,8 +20,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "100m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"
 
   orchestrator:
     image: randao/orchestrator:latest
@@ -39,6 +39,8 @@ services:
       SEED_PHRASE: ${SEED_PHRASE}
       WALLET_JSON: ${WALLET_JSON}
       DOCKER_NETWORK: backend
+      NETWORK_IP: ${NETWORK_IP}
+      NETWORK_MODE: ${NETWORK_MODE}
     networks:
       - backend
     volumes:
@@ -47,8 +49,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "100m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   backend:

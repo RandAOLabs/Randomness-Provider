@@ -1,26 +1,32 @@
 import Docker from 'dockerode';
-import { connectWithRetry, setupDatabase } from './db_tools.js';
+import { connectWithRetry, setupDatabase, performDatabaseMaintenance, performAggressiveCleanup } from './db_tools.js';
 import Arweave from "arweave";
 import { getWalletAddress, ensureWalletConfiguration } from "./walletUtils";
-import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown } from './helperFunctions.js';
+import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderRequests, processChallengeRequests, processOutputRequests, gracefulShutdown, getRandomClient } from './helperFunctions.js';
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
-export const VERSION = "1.0.12";
+export const VERSION = "1.0.18";
 
 export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
 export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.6';
 export const ORCHESTRATOR_IMAGE = 'randao/orchestrator:latest';
 
+// Optional network monitoring variables
+export const NETWORK_IP = process.env.NETWORK_IP;
+export const NETWORK_MODE = process.env.NETWORK_MODE; // "wifi", "ethernet", or "disconnected"
+
 export const DOCKER_MONITORING_TIME = 30000;
 export const POLLING_INTERVAL_MS = 0; //0 second
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
+export const DATABASE_MAINTENANCE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+export const AGGRESSIVE_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 minutes
 export const MINIMUM_ENTRIES = 10000;
 export const DRYRUNTIMEOUT = 30000; // 30 seconds
 export const MAX_RETRIES = 10;
 export const RETRY_DELAY_MS = 10000;
-export const COMPLETION_RETENTION_PERIOD_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+export const COMPLETION_RETENTION_PERIOD_MS = 2 * 60 * 60 * 1000; // 2 hours in milliseconds (reduced from 24h to prevent storage bloat)
 export const UNCHAIN_VS_OFFCHAIN_MAX_DIF = 50;
 export const MINIMUM_RANDOM_DELTA = 25;
 export const SHUTDOWN_POLLING_DELAY = 10;
@@ -28,6 +34,8 @@ export const SHUTDOWN_POLLING_DELAY = 10;
 let PROVIDER_ID = "";
 let pollingInProgress = false;
 let lastPollingId: string | null = null;
+let lastMaintenanceTime = 0;
+let lastAggressiveCleanupTime = 0;
 
 const arweave = Arweave.init({});
 
@@ -144,21 +152,56 @@ async function run(): Promise<void> {
     logger.info("Orchestrator starting up");
     
     // Ensure wallet configuration exists, generate if needed
+    logger.info("Step 1/4: Ensuring wallet configuration...");
     await ensureWalletConfiguration();
+    logger.info("Step 1/4: Wallet configuration complete");
     
-    logger.debug("Environment variables loaded, initializing services");
-
+    logger.info("Step 2/4: Initializing database services...");
     const client = await connectWithRetry();
     await setupDatabase(client);
+    logger.info("Step 2/4: Database services initialized");
 
     // Initialize wallet and set provider ID using wallet utilities
-    getWalletAddress().then((address) => {
-        logger.info(`Provider ID: ${address}`);
+    logger.info("Step 3/4: Initializing wallet and provider ID...");
+    try {
+        logger.info("Step 3a/4: Checking wallet configuration sources...");
+        const stepStart = Date.now();
+        
+        // This will internally handle wallet initialization from seed phrase or JSON
+        logger.info("Step 3b/4: Initializing wallet from configuration...");
+        const walletInitStart = Date.now();
+        const address = await getWalletAddress();
+        logger.info(`Step 3b/4: Wallet initialization complete (${Date.now() - walletInitStart}ms)`);
+        
+        logger.info("Step 3c/4: Setting provider ID from wallet address...");
+        const providerIdStart = Date.now();
         PROVIDER_ID = address;
-    }).catch(error => {
-        logger.error('Failed to initialize wallet:', error);
+        logger.info(`Step 3c/4: Provider ID set: ${address} (${Date.now() - providerIdStart}ms)`);
+        
+        logger.info("Step 3d/4: Validating provider ID configuration...");
+        const validationStart = Date.now();
+        if (!PROVIDER_ID || PROVIDER_ID.length === 0) {
+            throw new Error('Provider ID is empty or invalid');
+        }
+        logger.info(`Step 3d/4: Provider ID validation complete (${Date.now() - validationStart}ms)`);
+        
+        logger.info(`Step 3/4: Wallet and provider ID initialization complete (Total: ${Date.now() - stepStart}ms)`);
+    } catch (error) {
+        logger.error('Failed to initialize wallet and provider ID:', error);
         process.exit(1);
-    });
+    }
+    
+    // Initialize random client before starting main operations
+    logger.info("Step 4/4: Initializing random client (CRITICAL - must complete before operations)...");
+    try {
+        const randomClient = await getRandomClient();
+        logger.info("Step 4/4: Random client initialization complete - system ready for operations");
+        logger.info("=== ORCHESTRATOR STARTUP COMPLETE ===");
+    } catch (error) {
+        logger.error('CRITICAL: Failed to initialize random client during startup:', error);
+        logger.error('System cannot proceed without random client - shutting down');
+        process.exit(1);
+    }
 
     // Handle graceful shutdown before entering infinite loop
     process.on("SIGTERM", async () => {
@@ -180,10 +223,26 @@ async function run(): Promise<void> {
     //     await polling(client);
     // }, POLLING_INTERVAL_MS);
 
-    // Infinite polling loop
+    // Infinite polling loop with maintenance
     while (true) {
         try {
+            const currentTime = Date.now();
+            
+            // Regular polling
             await polling(client);
+            
+            // Database maintenance every 10 minutes
+            if (currentTime - lastMaintenanceTime >= DATABASE_MAINTENANCE_INTERVAL) {
+                await performDatabaseMaintenance(client);
+                lastMaintenanceTime = currentTime;
+            }
+            
+            // Aggressive cleanup every 30 minutes
+            if (currentTime - lastAggressiveCleanupTime >= AGGRESSIVE_CLEANUP_INTERVAL) {
+                await performAggressiveCleanup(client);
+                lastAggressiveCleanupTime = currentTime;
+            }
+            
         } catch (error) {
             logger.error("Polling error:", error);
         }
