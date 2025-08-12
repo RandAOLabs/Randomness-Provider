@@ -264,7 +264,7 @@ export class MonitoringService {
       health
     };
 
-    // Add optional network monitoring variables if present
+    // Add optional network monitoring variables if present TODO ADD THESE IN THE MONITORING DATA
     if (NETWORK_IP) {
       (monitoringData as any).networkIp = NETWORK_IP;
     }
