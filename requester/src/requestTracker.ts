@@ -1,4 +1,4 @@
-import { RandomClient } from "ao-process-clients";
+import { RandomClient } from "ao-js-sdk";
 import { getRandomClient } from "./app";
 
 // Map to track request timestamps

@@ -1,6 +1,6 @@
 import {
     RandomClient,
-} from "ao-process-clients";
+} from "ao-js-sdk";
 //import { TransferToProviders } from "./extra";
 
 const RETRY_DELAY_MS = 5000; // 1 seconds

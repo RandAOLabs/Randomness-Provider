@@ -1,4 +1,4 @@
-import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RequestList } from "ao-process-clients";
+import { GetOpenRandomRequestsResponse, GetProviderAvailableValuesResponse, RandomClient, RequestList } from "ao-js-sdk";
 import { Client } from "pg";
 import { COMPLETION_RETENTION_PERIOD_MS, MINIMUM_ENTRIES, MINIMUM_RANDOM_DELTA, UNCHAIN_VS_OFFCHAIN_MAX_DIF, ORCHESTRATOR_IMAGE, docker } from "./app";
 import { getMoreRandom, monitorDockerContainers, pullDockerImage } from "./containerManagment";

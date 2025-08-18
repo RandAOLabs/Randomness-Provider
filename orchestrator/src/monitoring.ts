@@ -4,7 +4,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import logger from './logger';
-import { MonitoringData, PerformanceMetrics, SystemSpecs, ExecutionMetrics, HealthStatus } from 'ao-process-clients';
+import { MonitoringData, PerformanceMetrics, SystemSpecs, ExecutionMetrics, HealthStatus } from 'ao-js-sdk';
 import { VERSION, NETWORK_IP, NETWORK_MODE } from './app';
 
 const execAsync = promisify(exec);
