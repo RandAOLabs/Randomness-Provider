@@ -6,7 +6,6 @@ import { wordlists, mnemonicToSeed } from "bip39-web-crypto";
 import { generateMnemonic, validateMnemonic } from 'bip39';
 import * as fs from 'fs';
 import * as path from 'path';
-import logger from "./logger";
 import Arweave from "arweave";
 
 // Initialize Arweave
@@ -42,20 +41,16 @@ async function updateEnvVariable(key: string, value: string): Promise<void> {
         if (regex.test(envContent)) {
             // Replace existing variable
             envContent = envContent.replace(regex, newLine);
-            logger.debug(`Updated existing ${key} in .env file`);
         } else {
             // Add new variable
             envContent += (envContent && !envContent.endsWith('\n') ? '\n' : '') + newLine + '\n';
-            logger.debug(`Added new ${key} to .env file`);
         }
         
         // Write updated content back to file
         fs.writeFileSync(envPath, envContent, 'utf8');
-        logger.info(`${key} saved to ${envPath}`);
         
     } catch (error) {
-        logger.error(`Failed to update ${key} in .env file:`, error);
-        throw error;
+        throw new Error(`Failed to update ${key} in .env file: ${error}`);
     }
 }
 
@@ -165,23 +160,12 @@ export function isValidMnemonic(mnemonic: string): number {
  * Creates or appends to .env file in docker-compose directory
  */
 export async function ensureWalletConfiguration(): Promise<void> {
-    logger.debug("=== WALLET CONFIGURATION DEBUG ===");
-    logger.debug(`Raw SEED_PHRASE env var: '${process.env.SEED_PHRASE}'`);
-    logger.debug(`Raw WALLET_JSON env var: '${process.env.WALLET_JSON}'`);
-    
     const hasSeedPhrase = !!process.env.SEED_PHRASE && 
         process.env.SEED_PHRASE !== "Create a NEW wallet and enter the 12 - 24 words here";
     const hasWalletJson = !!process.env.WALLET_JSON;
-    
-    logger.debug(`hasSeedPhrase: ${hasSeedPhrase}`);
-    logger.debug(`hasWalletJson: ${hasWalletJson}`);
 
     // If either configuration exists in environment variables, we're good
     if (hasSeedPhrase || hasWalletJson) {
-        logger.info("Wallet configuration found in environment variables");
-        if (hasSeedPhrase) {
-            logger.debug(`Using SEED_PHRASE with ${process.env.SEED_PHRASE!.split(' ').length} words`);
-        }
         return;
     }
 
@@ -195,18 +179,14 @@ export async function ensureWalletConfiguration(): Promise<void> {
             if (seedPhraseMatch && seedPhraseMatch[1]) {
                 const existingSeedPhrase = seedPhraseMatch[1];
                 if (existingSeedPhrase !== "Create a NEW wallet and enter the 12 - 24 words here") {
-                    logger.info("Found existing seed phrase in mounted .env file, using it");
-                    // Set the environment variable for the current process
                     process.env.SEED_PHRASE = existingSeedPhrase;
                     return;
                 }
             }
         } catch (error) {
-            logger.warn("Failed to read existing .env file:", error);
+            // Ignore read errors
         }
     }
-
-    logger.info("No wallet configuration found. Generating new BIP39 seed phrase...");
 
     try {
         // Generate a 12-word BIP39-compliant mnemonic
@@ -216,9 +196,6 @@ export async function ensureWalletConfiguration(): Promise<void> {
         if (!validateMnemonic(mnemonic)) {
             throw new Error("Generated mnemonic failed validation");
         }
-
-        logger.info(`Generated new 12-word seed phrase: ${mnemonic.split(' ').length} words`);
-        logger.debug(`Seed phrase: ${mnemonic}`);
 
         // Determine the .env file path (write to host directory via volume mount)
         const envPath = path.join('/host-compose', '.env');
@@ -230,9 +207,6 @@ export async function ensureWalletConfiguration(): Promise<void> {
         let envContent = '';
         if (fs.existsSync(envPath)) {
             envContent = fs.readFileSync(envPath, 'utf8');
-            logger.info("Found existing .env file, appending seed phrase");
-        } else {
-            logger.info("Creating new .env file with seed phrase");
         }
 
         // Append the seed phrase to the file
@@ -242,9 +216,7 @@ export async function ensureWalletConfiguration(): Promise<void> {
         // Set the environment variable for the current process
         process.env.SEED_PHRASE = mnemonic;
         
-        logger.info(`Seed phrase saved to ${envPath}`);
-        logger.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
-        logger.info("New seed phrase generated and loaded, continuing with startup...");
+        console.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
         
         // Generate and save the provider ID
         try {
@@ -252,13 +224,11 @@ export async function ensureWalletConfiguration(): Promise<void> {
             const providerId = await arweave.wallets.jwkToAddress(wallet);
             await updateEnvVariable('PROVIDER_ID', providerId);
             process.env.PROVIDER_ID = providerId;
-            logger.info(`Provider ID set: ${providerId}`);
         } catch (error) {
-            logger.error("Failed to generate and save provider ID:", error);
+            throw new Error(`Failed to generate and save provider ID: ${error}`);
         }
         
     } catch (error) {
-        logger.error("Failed to generate or save seed phrase:", error);
         throw new Error(`Wallet configuration setup failed: ${error}`);
     }
 }
@@ -270,91 +240,48 @@ export async function ensureWalletConfiguration(): Promise<void> {
  * @returns JWK wallet object
  */
 export async function initializeWallet(): Promise<JWKInterface> {
-  logger.debug("=== WALLET INITIALIZATION DEBUG ===");
-  
   // If wallet is already initialized, return it
   if (globalWallet) {
-    logger.debug("Using cached global wallet");
     return globalWallet;
-  }
-
-  logger.debug(`SEED_PHRASE present: ${!!process.env.SEED_PHRASE}`);
-  logger.debug(`WALLET_JSON present: ${!!process.env.WALLET_JSON}`);
-  if (process.env.SEED_PHRASE) {
-    logger.debug(`SEED_PHRASE length: ${process.env.SEED_PHRASE.length} chars`);
-    logger.debug(`SEED_PHRASE word count: ${process.env.SEED_PHRASE.split(' ').length}`);
-    logger.debug(`SEED_PHRASE first 20 chars: '${process.env.SEED_PHRASE.substring(0, 20)}...'`);
   }
 
   const hasSeedPhrase = !!process.env.SEED_PHRASE;
   const hasWalletJson = !!process.env.WALLET_JSON;
 
-  if (hasSeedPhrase && hasWalletJson) {
-    logger.info("Both SEED_PHRASE and WALLET_JSON are provided. Prioritizing SEED_PHRASE.");
-  } else if (!hasSeedPhrase && !hasWalletJson) {
-    logger.error("No wallet configuration found in initializeWallet!");
+  if (!hasSeedPhrase && !hasWalletJson) {
     throw new Error("No wallet configuration found. Please provide either SEED_PHRASE or WALLET_JSON in environment variables.");
   }
 
   let wallet: JWKInterface;
-  let seedPhraseAddress: string | undefined;
-  let jsonAddress: string | undefined;
 
   // Try to load wallet from seed phrase if available
   if (hasSeedPhrase) {
     try {
       const seedPhrase = process.env.SEED_PHRASE!;
-      logger.debug(`Attempting to validate seed phrase: '${seedPhrase.substring(0, 20)}...'`);
-      logger.debug(`Seed phrase word count: ${seedPhrase.split(' ').length}`);
       
       const validationResult = isValidMnemonic(seedPhrase);
-      logger.debug(`Seed phrase validation result: ${validationResult}`);
       
       if (!validationResult) {
-        logger.error(`Invalid seed phrase format! Phrase: '${seedPhrase}'`);
         throw new Error("Invalid seed phrase format");
       }
       
-      logger.debug("Creating JWK from mnemonic...");
       wallet = await jwkFromMnemonic(seedPhrase);
-      logger.debug("JWK creation successful, generating address...");
-      
-      seedPhraseAddress = await arweave.wallets.jwkToAddress(wallet);
-      logger.debug(`Generated wallet address: ${seedPhraseAddress}`);
-      
-      // If we have both, also get the JSON wallet address for comparison
-      if (hasWalletJson) {
-        try {
-          const jsonWallet = JSON.parse(process.env.WALLET_JSON!);
-          jsonAddress = await arweave.wallets.jwkToAddress(jsonWallet);
-        } catch (error) {
-          logger.error("Failed to parse WALLET_JSON", error);
-        }
-      }
+      const seedPhraseAddress = await arweave.wallets.jwkToAddress(wallet);
       
       walletSource = 'seed_phrase';
       globalWallet = wallet;
-      logger.info(`Using wallet from SEED_PHRASE with address: ${seedPhraseAddress}`);
       
       // Set PROVIDER_ID in .env file
       try {
         await updateEnvVariable('PROVIDER_ID', seedPhraseAddress);
         process.env.PROVIDER_ID = seedPhraseAddress;
-        logger.info(`Provider ID set from seed phrase: ${seedPhraseAddress}`);
       } catch (error) {
-        logger.error("Failed to save provider ID from seed phrase:", error);
+        // Ignore env file errors in standalone mode
       }
       
-      if (jsonAddress) {
-        logger.info(`WALLET_JSON address (not used): ${jsonAddress}`);
-      }
     } catch (error) {
-      logger.error("Failed to initialize wallet from SEED_PHRASE", error);
-      
       // Fall back to JSON if available
-      if (hasWalletJson) {
-        logger.info("Falling back to WALLET_JSON");
-      } else {
+      if (!hasWalletJson) {
         throw error;
       }
     }
@@ -364,19 +291,17 @@ export async function initializeWallet(): Promise<JWKInterface> {
   if (!globalWallet && hasWalletJson) {
     try {
       wallet = JSON.parse(process.env.WALLET_JSON!);
-      jsonAddress = await arweave.wallets.jwkToAddress(wallet);
+      const jsonAddress = await arweave.wallets.jwkToAddress(wallet);
       
       walletSource = 'json';
       globalWallet = wallet;
-      logger.info(`Using wallet from WALLET_JSON with address: ${jsonAddress}`);
       
       // Set PROVIDER_ID in .env file
       try {
-        await updateEnvVariable('PROVIDER_ID', jsonAddress!);
-        process.env.PROVIDER_ID = jsonAddress!;
-        logger.info(`Provider ID set from wallet JSON: ${jsonAddress}`);
+        await updateEnvVariable('PROVIDER_ID', jsonAddress);
+        process.env.PROVIDER_ID = jsonAddress;
       } catch (error) {
-        logger.error("Failed to save provider ID from wallet JSON:", error);
+        // Ignore env file errors in standalone mode
       }
     } catch (error) {
       throw new Error(`Failed to initialize wallet from WALLET_JSON: ${error}`);
@@ -403,4 +328,44 @@ export async function getWalletAddress(): Promise<string> {
  */
 export async function getWallet(): Promise<JWKInterface> {
   return await initializeWallet();
+}
+
+/**
+ * CLI function to get address from mnemonic
+ * Usage: npx ts-node walletUtils.ts "word1 word2 ... word12"
+ */
+async function getAddressFromMnemonic(mnemonic: string): Promise<string> {
+  try {
+    const validationResult = isValidMnemonic(mnemonic);
+    if (!validationResult) {
+      throw new Error("Invalid mnemonic phrase");
+    }
+    
+    const wallet = await jwkFromMnemonic(mnemonic);
+    const address = await arweave.wallets.jwkToAddress(wallet);
+    return address;
+  } catch (error) {
+    throw new Error(`Failed to generate address from mnemonic: ${error}`);
+  }
+}
+
+// CLI execution
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  
+  if (args.length !== 1) {
+    console.error('Usage: npx ts-node walletUtils.ts "word1 word2 ... word12"');
+    process.exit(1);
+  }
+  
+  const mnemonic = args[0];
+  
+  getAddressFromMnemonic(mnemonic)
+    .then(address => {
+      console.log(address);
+    })
+    .catch(error => {
+      console.error('Error:', error.message);
+      process.exit(1);
+    });
 }
