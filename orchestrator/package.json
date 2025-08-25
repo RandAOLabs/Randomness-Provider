@@ -28,7 +28,9 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "wallet-address": "ts-node src/walletUtils.ts",
+    "wallet-address": "node wallet-standalone.js",
+    "wallet-address-ts": "ts-node --project tsconfig.json src/walletUtils.ts",
+    "wallet-address-alt": "node -r ts-node/register src/walletUtils.ts",
     "build": "tsc",
     "wallet-address-js": "node dist/walletUtils.js"
   },
