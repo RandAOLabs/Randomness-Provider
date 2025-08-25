@@ -3,14 +3,20 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "module": "commonjs",
-    "target": "es6",
+    "target": "es2020",
     "strict": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
     "declaration": true,
-    "skipLibCheck": true,         // ✅ Added to skip library type checking
-    "typeRoots": ["./node_modules/@types"] // ✅ Added to force correct type resolution
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "*": ["node_modules/*", "src/*"]
+    },
+    "typeRoots": ["./node_modules/@types"]
   },
   "include": [
     "src/**/*.ts",
