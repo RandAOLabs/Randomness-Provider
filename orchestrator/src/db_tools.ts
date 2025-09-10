@@ -137,3 +137,188 @@ export async function performAggressiveCleanup(client: Client): Promise<void> {
         logger.error("❌ Error during aggressive cleanup:", error.message);
     }
 }
+
+// Get count of usable database entries
+export async function getUsableEntriesCount(client: Client): Promise<number> {
+    const res = await client.query(
+        'SELECT COUNT(*) AS count FROM time_lock_puzzles WHERE request_id IS NULL'
+    );
+    return parseInt(res.rows[0].count, 10);
+}
+
+// Assign request IDs to available database entries
+export async function assignRequestIdsToEntries(
+    client: Client, 
+    requestIds: string[]
+): Promise<{ requestId: string, dbId: string }[]> {
+    await client.query('BEGIN');
+    
+    try {
+        // Fetch already assigned request_id -> dbId mappings
+        const existingMappingsRes = await client.query(
+            `SELECT request_id FROM time_lock_puzzles 
+             WHERE request_id = ANY($1) 
+             FOR UPDATE SKIP LOCKED`,
+            [requestIds]
+        );
+
+        const existingRequestIds = new Set(existingMappingsRes.rows.map(row => row.request_id));
+        const unmappedRequestIds = requestIds.filter(requestId => !existingRequestIds.has(requestId));
+        
+        let mappedEntries: { requestId: string, dbId: string }[] = [];
+
+        if (unmappedRequestIds.length > 0) {
+            const dbRes = await client.query(
+                `SELECT id FROM time_lock_puzzles 
+                 WHERE request_id IS NULL 
+                 ORDER BY id ASC 
+                 LIMIT $1 
+                 FOR UPDATE SKIP LOCKED`,
+                [unmappedRequestIds.length]
+            );
+
+            const availableDbEntries = dbRes.rows.map(row => row.id);
+
+            if (availableDbEntries.length > 0) {
+                const numMappings = Math.min(unmappedRequestIds.length, availableDbEntries.length);
+
+                for (let i = 0; i < numMappings; i++) {
+                    await client.query(
+                        `UPDATE time_lock_puzzles 
+                         SET request_id = $1 
+                         WHERE id = $2`,
+                        [unmappedRequestIds[i], availableDbEntries[i]]
+                    );
+                    mappedEntries.push({ requestId: unmappedRequestIds[i], dbId: availableDbEntries[i] });
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+        return [...Array.from(existingRequestIds).map(id => ({ requestId: id, dbId: '' })), ...mappedEntries];
+        
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    }
+}
+
+// Get puzzle data for challenge fulfillment
+export async function getPuzzleDataForChallenge(client: Client, requestId: string): Promise<{
+    id: string;
+    modulus: string;
+    x: string;
+} | null> {
+    const res = await client.query(
+        `SELECT id, modulus, x 
+         FROM time_lock_puzzles 
+         WHERE request_id = $1`,
+        [requestId]
+    );
+
+    if (!res.rowCount) {
+        return null;
+    }
+
+    return res.rows[0];
+}
+
+// Get puzzle data for output fulfillment
+export async function getPuzzleDataForOutput(client: Client, requestId: string): Promise<{
+    id: string;
+    output: string;
+    rsaP: string;
+    rsaQ: string;
+} | null> {
+    const res = await client.query(
+        `SELECT 
+            tlp.id, 
+            tlp.y AS output, 
+            rk.p AS rsaP, 
+            rk.q AS rsaQ 
+        FROM time_lock_puzzles tlp
+        JOIN rsa_keys rk ON tlp.rsa_id = rk.id
+        WHERE tlp.request_id = $1`,
+        [requestId]
+    );
+
+    if (!res.rowCount) {
+        return null;
+    }
+
+    return res.rows[0];
+}
+
+// Clean up fulfilled entries that are no longer in use
+export async function cleanupFulfilledEntriesAdvanced(
+    client: Client,
+    activeChallengeRequestIds: string[],
+    activeOutputRequestIds: string[],
+    retentionPeriodMs: number
+): Promise<{ markedCompleted: number, deleted: number }> {
+    const now = new Date();
+    const cutoffTime = new Date(now.getTime() - retentionPeriodMs);
+
+    try {
+        await client.query('BEGIN');
+
+        // Fetch all entries with a request_id
+        const result = await client.query(`
+            SELECT id, request_id, detected_completed 
+            FROM time_lock_puzzles 
+            WHERE request_id IS NOT NULL
+        `);
+
+        let markForDeletion: string[] = [];
+        let markAsCompleted: string[] = [];
+
+        for (const row of result.rows) {
+            const { id, request_id, detected_completed } = row;
+
+            // Check if this request is still active in challenge or output
+            const isStillInChallenge = activeChallengeRequestIds.includes(request_id);
+            const isStillInOutput = activeOutputRequestIds.includes(request_id);
+
+            if (!isStillInChallenge && !isStillInOutput) {
+                if (!detected_completed) {
+                    // Mark it for deletion by setting detected_completed timestamp
+                    markAsCompleted.push(id);
+                } else if (new Date(detected_completed) < cutoffTime) {
+                    // If already marked and older than retention period, delete it
+                    markForDeletion.push(id);
+                }
+            }
+        }
+
+        // Mark entries as completed
+        if (markAsCompleted.length > 0) {
+            await client.query(`
+                UPDATE time_lock_puzzles
+                SET detected_completed = NOW()
+                WHERE id = ANY($1)
+            `, [markAsCompleted]);
+        }
+
+        // Delete old completed entries 
+        if (markForDeletion.length > 0) {
+            await client.query(`
+                DELETE FROM rsa_keys
+                WHERE id IN (
+                    SELECT rsa_id FROM time_lock_puzzles WHERE id = ANY($1)
+                );
+            `, [markForDeletion]);
+
+            await client.query(`
+                DELETE FROM time_lock_puzzles
+                WHERE id = ANY($1);
+            `, [markForDeletion]);
+        }
+
+        await client.query('COMMIT');
+        return { markedCompleted: markAsCompleted.length, deleted: markForDeletion.length };
+        
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    }
+}

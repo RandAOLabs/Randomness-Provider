@@ -25,7 +25,6 @@ services:
 
   orchestrator:
     image: randao/orchestrator:latest
-    pull_policy: always  # Ensure the latest image is always pulled
     restart: unless-stopped  # Restart on crash (or on exit with non-zero code)
     depends_on:
       postgres:

@@ -6,30 +6,30 @@ import logger, { LogLevel } from "./logger";
 import { monitoring } from "./monitoring";
 import { setTimeout, setInterval } from 'timers';
 import { getWallet } from "./walletUtils";
+import { getUsableEntriesCount, assignRequestIdsToEntries, getPuzzleDataForChallenge, getPuzzleDataForOutput, cleanupFulfilledEntriesAdvanced } from "./db_tools";
+import * as aoSdkPackage from "ao-js-sdk/package.json";
 
+// Random client management
 let randomClientInstance: RandomClient | null = null;
 let lastInitTime: number = 0;
-const REINIT_INTERVAL = 60 * 1 * 1000; // 1 minute in milliseconds
-let current_onchain_random = - 10
+const REINIT_INTERVAL = 60 * 60 * 1000; // 1 hour
+let current_onchain_random = -10;
 
-// Cooldown tracking for updateAvailableValuesAsync
-let lastUpdatedOnChainTime = 0;
+// Simple flags
+let isInitializing = false;
+let firstInitializationComplete = false;
+let ongoingRandomGeneration = false;
+let initializationPromise: Promise<RandomClient> | null = null;
+
+// Constants
+const MAX_RANDOM_PER_REQUEST = 500;
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
-// Cooldown tracking for fulfillRandomChallenge and fulfillRandomOutput (per request ID)
+// Tracking maps
 const challengeCooldowns = new Map<string, boolean>();
 const outputCooldowns = new Map<string, boolean>();
-// Track whether there's an ongoing random generation request
-let ongoingRandomGeneration = false;
-const MAX_RANDOM_PER_REQUEST = 500; // Maximum number of random values to generate in a single request
-
-// Map to track request timestamps
 const requestTimestamps: Map<string, number> = new Map();
-
-let isInitializing = false; // Track if initialization is in progress
-let initPromise: Promise<RandomClient> | null = null; // Store the initialization promise
-let isFirstInitialization = true; // Track if this is the first initialization
-let firstInitializationComplete = false; // Track if first initialization has completed
+let lastUpdatedOnChainTime = 0;
 
 // Function to reset the ongoingRandomGeneration flag
 export function resetOngoingRandomGeneration() {
@@ -38,154 +38,115 @@ export function resetOngoingRandomGeneration() {
 }
 
 export async function getRandomClient(): Promise<RandomClient> {
-    const currentTime = Date.now();
-
-    // For first initialization, always wait for completion
-    if (isFirstInitialization || !firstInitializationComplete) {
-        logger.info('[RandomClient] First initialization required - awaiting completion');
-        return await initializeRandomClientWithLogging(true);
+    // First initialization - must complete
+    if (!firstInitializationComplete) {
+        if (initializationPromise) {
+            return await initializationPromise;
+        }
+        return await initializeRandomClient();
     }
 
-    // Return the existing instance if it's valid and fresh
+    // Return existing client if fresh (less than 1 hour old)
+    const currentTime = Date.now();
     if (randomClientInstance && (currentTime - lastInitTime) <= REINIT_INTERVAL) {
         return randomClientInstance;
     }
 
-    // If reinitialization is already happening, wait for it if it's the first init, otherwise serve old instance
-    if (isInitializing) {
-        if (initPromise) {
-            logger.info('[RandomClient] Reinitialization in progress - awaiting completion');
-            return await initPromise;
-        } else {
-            logger.info('[RandomClient] Reinitialization in progress, serving old instance');
-            return randomClientInstance!;
+    // Handle reinitialization
+    if (isInitializing && initializationPromise) {
+        // Wait for ongoing initialization to complete
+        try {
+            return await initializationPromise;
+        } catch (err) {
+            logger.error('[RandomClient] Failed to wait for reinitialization:', err);
+            // Fall back to old client if available
+            if (randomClientInstance) {
+                return randomClientInstance;
+            }
+            throw err;
         }
     }
 
-    // Start reinitialization (background for subsequent inits)
-    logger.info('[RandomClient] Background reinitialization triggered');
-    return await initializeRandomClientWithLogging(false);
+    // Start new reinitialization if not already happening
+    if (!isInitializing) {
+        initializationPromise = initializeRandomClient();
+        initializationPromise.catch(err => 
+            logger.error('[RandomClient] Background reinitialization failed:', err)
+        );
+        
+        // For background reinitialization, return old client immediately
+        if (randomClientInstance) {
+            return randomClientInstance;
+        }
+        
+        // No old client available, must wait for new one
+        return await initializationPromise;
+    }
+
+    // Should not reach here, but return old client as fallback
+    return randomClientInstance!;
 }
 
 
 /**
- * Initialize the random client with detailed step-by-step logging
- * @param awaitCompletion Whether to await completion or run in background
- * @returns Promise<RandomClient>
+ * Initialize the random client - thread-safe with proper promise handling
  */
-async function initializeRandomClientWithLogging(awaitCompletion: boolean): Promise<RandomClient> {
-    // If already initializing and we need to await, return the existing promise
-    if (isInitializing && initPromise && awaitCompletion) {
-        logger.info('[RandomClient] Initialization already in progress - awaiting existing promise');
-        return await initPromise;
-    }
-
-    // If already initializing but not awaiting, return old instance
-    if (isInitializing && !awaitCompletion && randomClientInstance) {
-        logger.info('[RandomClient] Initialization in progress - serving old instance');
-        return randomClientInstance;
-    }
-
-    // Start new initialization
-    isInitializing = true;
-    const initStartTime = Date.now();
-    const initType = isFirstInitialization ? 'FIRST' : 'REINIT';
-    
-    logger.info(`[RandomClient] Starting ${initType} initialization...`);
-    
-    const initializationPromise = (async (): Promise<RandomClient> => {
-        try {
-            // Step 1: Wallet initialization
-            logger.info('[RandomClient] Step 1/4: Initializing wallet configuration...');
-            const stepStart = Date.now();
-            const wallet = await getWallet();
-            logger.info(`[RandomClient] Step 1/4: Wallet configuration complete (${Date.now() - stepStart}ms)`);
-            
-            // Step 2: Client builder initialization
-            logger.info('[RandomClient] Step 2/4: Creating RandomClient builder...');
-            const step2Start = Date.now();
-            const builder = await RandomClient.defaultBuilder();
-            logger.info(`[RandomClient] Step 2/4: RandomClient builder created (${Date.now() - step2Start}ms)`);
-            
-            // Step 3: Configuration setup
-            logger.info('[RandomClient] Step 3/4: Configuring client with wallet and AO settings...');
-            const step3Start = Date.now();
-            const configuredBuilder = builder
-                .withWallet(wallet)
-                .withAOConfig({
-                    CU_URL: process.env.CU_URL || "https://ur-cu.randao.net",
-                    MU_URL: process.env.MU_URL || "https://ur-mu.randao.net",
-                    MODE: "legacy" as const
-                });
-            logger.info(`[RandomClient] Step 3/4: Client configuration complete (${Date.now() - step3Start}ms)`);
-            
-            // Step 4: Build and finalize
-            logger.info('[RandomClient] Step 4/4: Building final RandomClient instance...');
-            const step4Start = Date.now();
-            const newClient = await configuredBuilder.build();
-            logger.info(`[RandomClient] Step 4/4: RandomClient build complete (${Date.now() - step4Start}ms)`);
-            
-            // Finalize initialization
-            randomClientInstance = newClient;
-            lastInitTime = Date.now();
-            
-            if (isFirstInitialization) {
-                firstInitializationComplete = true;
-                isFirstInitialization = false;
-                logger.info(`[RandomClient] FIRST initialization completed successfully! Total time: ${Date.now() - initStartTime}ms`);
-            } else {
-                logger.info(`[RandomClient] Reinitialization completed successfully! Total time: ${Date.now() - initStartTime}ms`);
-            }
-            
-            return newClient;
-            
-        } catch (err) {
-            const errorMsg = `${initType} initialization failed after ${Date.now() - initStartTime}ms`;
-            logger.error(`[RandomClient] ${errorMsg}:`, err);
-            
-            // If this is first initialization and it failed, we need to retry
-            if (isFirstInitialization) {
-                logger.error('[RandomClient] CRITICAL: First initialization failed - system cannot proceed without random client');
-                throw new Error(`Critical random client initialization failure: ${err}`);
-            }
-            
-            throw err;
-        } finally {
-            isInitializing = false;
-            initPromise = null;
-        }
-    })();
-    
-    // Store the promise for potential awaiting
-    initPromise = initializationPromise;
-    
-    if (awaitCompletion) {
+async function initializeRandomClient(): Promise<RandomClient> {
+    // If already initializing, wait for the existing promise
+    if (isInitializing && initializationPromise) {
         return await initializationPromise;
-    } else {
-        // Run in background, return old instance if available
-        initializationPromise.catch(err => {
-            logger.error('[RandomClient] Background initialization failed:', err);
-        });
+    }
+
+    isInitializing = true;
+    const isFirst = !firstInitializationComplete;
+    const AO_CONFIG = {
+        MU_URL: "https://ur-mu.randao.net",
+        CU_URL: "https://ur-cu.randao.net",
+        // MU_URL: "https://mu.ao-testnet.xyz",
+        // CU_URL: "https://cu.ao-testnet.xyz",
+        GATEWAY_URL: "https://arweave.net",
+        MODE: "legacy" as const
+    };
+    
+    try {
+        logger.info(`[RandomClient] Using ao-js-sdk version: ${aoSdkPackage.version}`);
+        const wallet = await getWallet();
+        console.log('Wallet loaded:', wallet ? 'SUCCESS' : 'FAILED');
+        const client = (await RandomClient.builder())
+            .withWallet(wallet)
+            .withAOConfig(AO_CONFIG)
+            .withProcessId("1nTos_shMV8HlC7f2svZNZ3J09BROKCTK8DyvkrzLag")
+            .withTokenAOConfig(AO_CONFIG)
+            .withTokenProcessId("rPpsRk9Rm8_SJ1JF8m9_zjTalkv9Soaa_5U0tYUloeY")
+            .build();
         
-        if (randomClientInstance) {
-            return randomClientInstance;
-        } else {
-            // No old instance available, must await
-            logger.warn('[RandomClient] No existing instance available - forcing await of initialization');
-            return await initializationPromise;
+        randomClientInstance = client;
+        lastInitTime = Date.now();
+        
+        if (isFirst) {
+            firstInitializationComplete = true;
         }
+        
+        return client;
+        
+    } catch (err) {
+        if (isFirst) {
+            throw new Error(`Critical: Random client initialization failed: ${err}`);
+        }
+        throw err;
+    } finally {
+        isInitializing = false;
+        initializationPromise = null;
     }
 }
 
-// Add a method to explicitly refresh the client if needed
+// Force refresh the client
 export async function refreshRandomClient(): Promise<RandomClient> {
-    logger.info('[RandomClient] Explicit refresh requested');
     randomClientInstance = null;
     lastInitTime = 0;
     isInitializing = false;
-    initPromise = null;
-    // Don't reset first initialization flags - this is just a refresh
-    return await initializeRandomClientWithLogging(true);
+    initializationPromise = null;
+    return await initializeRandomClient();
 }
 
 // Step 2: Process Challenge Requests (Database selection & assigning is atomic)
@@ -205,84 +166,26 @@ export async function processChallengeRequests(
     logger.info(`${parentLogId} Processing up to ${requestIds.length} requests.`);
 
     try {
-        await client.query('BEGIN'); // Start transaction
+        // Use db_tools function to assign request IDs to database entries
+        const mappedEntries = await assignRequestIdsToEntries(client, requestIds);
+        logger.info(`${parentLogId} Assigned ${mappedEntries.length} request IDs to database entries.`);
 
-        logger.debug(`${parentLogId} Fetching existing request mappings.`);
-
-        // Fetch already assigned request_id -> dbId mappings
-        const existingMappingsRes = await client.query(
-            `SELECT request_id FROM time_lock_puzzles 
-             WHERE request_id = ANY($1) 
-             FOR UPDATE SKIP LOCKED`,
-            [requestIds]
-        );
-
-        const existingRequestIds = new Set(existingMappingsRes.rows.map(row => row.request_id));
-        logger.debug(`${parentLogId} Found ${existingRequestIds.size} already mapped requests.`);
-
-        // Find only the unmapped requests (requestIds not in existingRequestIds)
-        const unmappedRequestIds = requestIds.filter(requestId => !existingRequestIds.has(requestId));
-        logger.debug(`${parentLogId} Unmapped requests: ${unmappedRequestIds.length}`);
-
-        let mappedEntries: { requestId: string, dbId: number }[] = [];
-
-        if (unmappedRequestIds.length > 0) {
-            logger.debug(`${parentLogId} Fetching available DB entries.`);
-            const dbRes = await client.query(
-                `SELECT id FROM time_lock_puzzles 
-                 WHERE request_id IS NULL 
-                 ORDER BY id ASC 
-                 LIMIT $1 
-                 FOR UPDATE SKIP LOCKED`,
-                [unmappedRequestIds.length]
-            );
-
-            const availableDbEntries = dbRes.rows.map(row => row.id);
-            logger.debug(`${parentLogId} Found ${availableDbEntries.length} available DB entries.`);
-
-            if (availableDbEntries.length > 0) {
-                const numMappings = Math.min(unmappedRequestIds.length, availableDbEntries.length);
-
-                for (let i = 0; i < numMappings; i++) {
-                    await client.query(
-                        `UPDATE time_lock_puzzles 
-                         SET request_id = $1 
-                         WHERE id = $2`,
-                        [unmappedRequestIds[i], availableDbEntries[i]]
-                    );
-                    mappedEntries.push({ requestId: unmappedRequestIds[i], dbId: availableDbEntries[i] });
-                    logger.debug(`${parentLogId} Assigned Request ID ${unmappedRequestIds[i]} to DB Entry ${availableDbEntries[i]}.`);
-                }
-            } else {
-                logger.warn(`${parentLogId} No available DB entries for unmapped requests.`);
-            }
-        }
-
-        // Collect all request IDs (previously mapped + newly mapped)
-        const allRequestIds = [...existingRequestIds, ...mappedEntries.map(entry => entry.requestId)];
-
-        if (allRequestIds.length === 0) {
-            logger.info(`${parentLogId} No requests to process. Committing transaction.`);
-            await client.query('COMMIT');
+        if (mappedEntries.length === 0) {
+            logger.info(`${parentLogId} No requests to process.`);
             return;
         }
 
-        await client.query('COMMIT'); // Commit all updates at once
-        logger.info(`${parentLogId} Committed all changes. Now fulfilling challenges.`);
-
         // Call fulfillRandomChallenge for all request IDs
         await Promise.all(
-            allRequestIds.map(requestId =>
-                fulfillRandomChallenge(client, requestId, parentLogId)
-                    .catch(error => logger.error(`${parentLogId} Error fulfilling challenge for Request ID ${requestId}:`, error))
+            mappedEntries.map(entry =>
+                fulfillRandomChallenge(client, entry.requestId, parentLogId)
+                    .catch(error => logger.error(`${parentLogId} Error fulfilling challenge for Request ID ${entry.requestId}:`, error))
             )
         );
 
         logger.info(`${parentLogId} All challenges fulfilled`);
     } catch (error: any) {
         logger.error(`${parentLogId} Error in processChallengeRequests:`, error);
-        await client.query('ROLLBACK'); // Rollback on failure
-
         logger.error(`SQL State: ${error.code}, Message: ${error.message}`);
     }
 }
@@ -320,71 +223,22 @@ export async function cleanupFulfilledEntries(
 ): Promise<void> {
     logger.info(`${parentLogId} Step 4: Checking for fulfilled entries no longer in use.`);
 
-    const now = new Date();
-    const cutoffTime = new Date(now.getTime() - COMPLETION_RETENTION_PERIOD_MS);
-
     try {
-        await client.query('BEGIN');
+        const activeChallengeRequestIds = openRequests.activeChallengeRequests?.request_ids || [];
+        const activeOutputRequestIds = openRequests.activeOutputRequests?.request_ids || [];
+        
+        // Use db_tools function for cleanup
+        const result = await cleanupFulfilledEntriesAdvanced(
+            client,
+            activeChallengeRequestIds,
+            activeOutputRequestIds,
+            COMPLETION_RETENTION_PERIOD_MS
+        );
 
-        // Fetch all entries with a request_id
-        const result = await client.query(`
-            SELECT id, request_id, detected_completed 
-            FROM time_lock_puzzles 
-            WHERE request_id IS NOT NULL
-        `);
-
-        let markForDeletion: string[] = [];
-        let markAsCompleted: string[] = [];
-
-        for (const row of result.rows) {
-            const { id, request_id, detected_completed } = row;
-
-            // Check if this request is still active in challenge or output
-            const isStillInChallenge = openRequests.activeChallengeRequests?.request_ids.includes(request_id);
-            const isStillInOutput = openRequests.activeOutputRequests?.request_ids.includes(request_id);
-
-            if (!isStillInChallenge && !isStillInOutput) {
-                if (!detected_completed) {
-                    // Mark it for deletion by setting detected_completed timestamp
-                    markAsCompleted.push(id);
-                } else if (new Date(detected_completed) < cutoffTime) {
-                    // If already marked and older than retention period, delete it
-                    markForDeletion.push(id);
-                }
-            }
-        }
-
-        // Mark entries as completed
-        if (markAsCompleted.length > 0) {
-            await client.query(`
-                UPDATE time_lock_puzzles
-                SET detected_completed = NOW()
-                WHERE id = ANY($1)
-            `, [markAsCompleted]);
-            logger.debug(`${parentLogId} Marked ${markAsCompleted.length} entries as completed.`);
-        }
-
-        // Delete old completed entries 
-        if (markForDeletion.length > 0) {
-            await client.query(`
-                DELETE FROM rsa_keys
-                WHERE id IN (
-                    SELECT rsa_id FROM time_lock_puzzles WHERE id = ANY($1)
-                );
-            `, [markForDeletion]);
-
-            await client.query(`
-                DELETE FROM time_lock_puzzles
-                WHERE id = ANY($1);
-            `, [markForDeletion]);
-
-            logger.info(`${parentLogId} Deleted ${markForDeletion.length} old completed entries and corresponding RSA keys.`);
-        }
-
-        await client.query('COMMIT');
+        logger.debug(`${parentLogId} Marked ${result.markedCompleted} entries as completed.`);
+        logger.info(`${parentLogId} Deleted ${result.deleted} old completed entries and corresponding RSA keys.`);
     } catch (error) {
         logger.error(`${parentLogId} Error in cleanupFulfilledEntries:`, error);
-        await client.query('ROLLBACK');
     }
 
     logger.info(`${parentLogId} Step 4 completed.`);
@@ -460,7 +314,7 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
         try {
             client = await getRandomClient();
             if (!client) {
-                throw new Error('Failed to initialize RandomClient');
+                throw new Error('Failed to initialize RandomClient1');
             }
         } catch (clientError) {
             logger.error(`${parentLogId} Failed to initialize RandomClient:`, clientError);
@@ -637,11 +491,8 @@ export async function getProviderRequests(PROVIDER_ID: string, parentLogId: stri
 // Function to check and fetch database entries as needed
 export async function checkAndFetchIfNeeded(client: Client) {
     try {
-        // Query current count of usable DB entries
-        const res = await client.query(
-            'SELECT COUNT(*) AS count FROM time_lock_puzzles WHERE request_id IS NULL'
-        );
-        const currentCount = parseInt(res.rows[0].count, 10);
+        // Use db_tools function to get count of usable DB entries
+        const currentCount = await getUsableEntriesCount(client);
         logger.info(`Total usable DB entries: ${currentCount}`);
 
         switch (current_onchain_random) {
@@ -782,24 +633,18 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
             // Get a fresh client for each attempt
             randomClient = await getRandomClient();
             if (!randomClient) {
-                throw new Error('Failed to initialize RandomClient');
+                throw new Error('Failed to initialize RandomClient2');
             }
 
-            // Fetch the necessary details from the database using requestId
-            const res = await client.query(
-                `SELECT id, modulus, x 
-                 FROM time_lock_puzzles 
-                 WHERE request_id = $1`,
-                [requestId]
-            );
-
-            if (!res.rowCount) {
+            // Use db_tools function to get puzzle data
+            const puzzleData = await getPuzzleDataForChallenge(client, requestId);
+            
+            if (!puzzleData) {
                 logger.error(`${logPrefix} No database entry found for request`);
                 return;
             }
 
-
-            const { id: dbId, modulus, x: input } = res.rows[0];
+            const { id: dbId, modulus, x: input } = puzzleData;
             
             if (!modulus || !input) {
                 throw new Error('Missing required fields in database entry');
@@ -881,29 +726,18 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
             // Get a fresh client for each attempt
             randomClient = await getRandomClient();
             if (!randomClient) {
-                throw new Error('Failed to initialize RandomClient');
+                throw new Error('Failed to initialize RandomClient3');
             }
 
-            // Fetch the output and proof from the database using the requestId
-            const res = await client.query(
-                `SELECT 
-                    tlp.id, 
-                    tlp.y AS output, 
-                    rk.p, 
-                    rk.q 
-                FROM time_lock_puzzles tlp
-                JOIN rsa_keys rk ON tlp.rsa_id = rk.id
-                WHERE tlp.request_id = $1`,
-                [requestId]
-            );
-
-            if (!res.rowCount) {
+            // Use db_tools function to get puzzle data for output
+            const puzzleData = await getPuzzleDataForOutput(client, requestId);
+            
+            if (!puzzleData) {
                 logger.error(`${logPrefix} No database entry found for request`);
                 return;
             }
 
-
-            const { id: dbId, output, p: rsaP, q: rsaQ } = res.rows[0];
+            const { id: dbId, output, rsaP, rsaQ } = puzzleData;
             
             if (!output || !rsaP || !rsaQ) {
                 throw new Error('Missing required fields in database entry');
@@ -991,22 +825,6 @@ export async function gracefulShutdown() {
         logger.debug(`${logPrefix} Error details:`, error);
         monitoring.incrementErrorCount();
     } finally {
-        // // Ensure the client is properly cleaned up
-        // if (randomClient) {
-        //     try {
-        //         if (typeof (randomClient as any).disconnect === 'function') {
-        //             await (randomClient as any).disconnect().catch((e: Error) => 
-        //                 logger.warn(`${logPrefix} Error disconnecting client:`, e)
-        //             );
-        //         }
-        //     } catch (e) {
-        //         logger.warn(`${logPrefix} Error during client cleanup:`, e);
-        //     }
-        // }
-        
-        // // Clear the client instance to ensure a fresh start if the process continues
-        // randomClientInstance = null;
-
-        
+   
     }
 }
