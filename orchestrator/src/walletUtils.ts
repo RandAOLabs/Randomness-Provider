@@ -17,7 +17,6 @@ const arweave = Arweave.init({
 
 // Global wallet storage
 let globalWallet: JWKInterface | null = null;
-let walletSource: 'seed_phrase' | 'json' | null = null;
 
 /**
  * Update or add a variable to the .env file
@@ -29,6 +28,12 @@ async function updateEnvVariable(key: string, value: string): Promise<void> {
         const envPath = path.join('/host-compose', '.env');
         let envContent = '';
         
+        // Create directory if it doesn't exist
+        const envDir = path.dirname(envPath);
+        if (!fs.existsSync(envDir)) {
+            fs.mkdirSync(envDir, { recursive: true });
+        }
+        
         // Read existing content if file exists
         if (fs.existsSync(envPath)) {
             envContent = fs.readFileSync(envPath, 'utf8');
@@ -37,6 +42,47 @@ async function updateEnvVariable(key: string, value: string): Promise<void> {
         // Check if the variable already exists
         const regex = new RegExp(`^${key}=.*$`, 'm');
         const newLine = `${key}="${value}"`;
+        
+        if (regex.test(envContent)) {
+            // Replace existing variable
+            envContent = envContent.replace(regex, newLine);
+        } else {
+            // Add new variable
+            envContent += (envContent && !envContent.endsWith('\n') ? '\n' : '') + newLine + '\n';
+        }
+        
+        // Write updated content back to file
+        fs.writeFileSync(envPath, envContent, 'utf8');
+        
+    } catch (error) {
+        throw new Error(`Failed to update ${key} in .env file: ${error}`);
+    }
+}
+
+/**
+ * Update or add a variable to the .env file using single quotes
+ * @param key Environment variable key
+ * @param value Environment variable value
+ */
+async function updateEnvVariableWithSingleQuotes(key: string, value: string): Promise<void> {
+    try {
+        const envPath = path.join('/host-compose', '.env');
+        let envContent = '';
+        
+        // Create directory if it doesn't exist
+        const envDir = path.dirname(envPath);
+        if (!fs.existsSync(envDir)) {
+            fs.mkdirSync(envDir, { recursive: true });
+        }
+        
+        // Read existing content if file exists
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        }
+        
+        // Check if the variable already exists
+        const regex = new RegExp(`^${key}\\s*=.*$`, 'm');
+        const newLine = `${key} = '${value}'`;
         
         if (regex.test(envContent)) {
             // Replace existing variable
@@ -156,159 +202,114 @@ export function isValidMnemonic(mnemonic: string): number {
 }
 
 /**
- * Check for missing wallet configuration and generate seed phrase if needed
- * Creates or appends to .env file in docker-compose directory
+ * Initialize wallet configuration - loads existing or creates new
  */
 export async function ensureWalletConfiguration(): Promise<void> {
-    const hasSeedPhrase = !!process.env.SEED_PHRASE && 
-        process.env.SEED_PHRASE !== "Create a NEW wallet and enter the 12 - 24 words here";
-    const hasWalletJson = !!process.env.WALLET_JSON;
-
-    // If either configuration exists in environment variables, we're good
-    if (hasSeedPhrase || hasWalletJson) {
+    // Try existing wallet JSON first
+    let walletJson = loadWalletJson();
+    if (walletJson) {
+        const wallet = JSON.parse(walletJson);
+        const providerId = await arweave.wallets.jwkToAddress(wallet);
+        process.env.WALLET_JSON = walletJson;
+        process.env.PROVIDER_ID = providerId;
+        await updateEnvVariable('PROVIDER_ID', providerId);
         return;
     }
-
-    // Fallback: Check if seed phrase exists in the mounted .env file
-    const envPath = path.join('/host-compose', '.env');
-    if (fs.existsSync(envPath)) {
-        try {
-            const envContent = fs.readFileSync(envPath, 'utf8');
-            const seedPhraseMatch = envContent.match(/^SEED_PHRASE="(.+)"$/m);
-            
-            if (seedPhraseMatch && seedPhraseMatch[1]) {
-                const existingSeedPhrase = seedPhraseMatch[1];
-                if (existingSeedPhrase !== "Create a NEW wallet and enter the 12 - 24 words here") {
-                    process.env.SEED_PHRASE = existingSeedPhrase;
-                    return;
-                }
-            }
-        } catch (error) {
-            // Ignore read errors
-        }
+    
+    // Try existing seed phrase
+    let seedPhrase = loadSeedPhrase();
+    if (seedPhrase) {
+        const wallet = await jwkFromMnemonic(seedPhrase);
+        walletJson = JSON.stringify(wallet);
+        const providerId = await arweave.wallets.jwkToAddress(wallet);
+        
+        await updateEnvVariableWithSingleQuotes('WALLET_JSON', walletJson);
+        await updateEnvVariable('PROVIDER_ID', providerId);
+        
+        process.env.WALLET_JSON = walletJson;
+        process.env.PROVIDER_ID = providerId;
+        return;
     }
-
-    try {
-        // Generate a 12-word BIP39-compliant mnemonic
-        const mnemonic = generateMnemonic(128); // 128 bits = 12 words
-        
-        // Validate the generated mnemonic
-        if (!validateMnemonic(mnemonic)) {
-            throw new Error("Generated mnemonic failed validation");
-        }
-
-        // Determine the .env file path (write to host directory via volume mount)
-        const envPath = path.join('/host-compose', '.env');
-        
-        // Prepare the seed phrase entry
-        const seedPhraseEntry = `SEED_PHRASE="${mnemonic}"`;
-        
-        // Check if .env file exists
-        let envContent = '';
-        if (fs.existsSync(envPath)) {
-            envContent = fs.readFileSync(envPath, 'utf8');
-        }
-
-        // Append the seed phrase to the file
-        const newContent = envContent + (envContent && !envContent.endsWith('\n') ? '\n' : '') + seedPhraseEntry + '\n';
-        fs.writeFileSync(envPath, newContent, 'utf8');
-        
-        // Set the environment variable for the current process
-        process.env.SEED_PHRASE = mnemonic;
-        
-        console.warn("IMPORTANT: Please backup your seed phrase securely. This is the only way to recover your wallet!");
-        
-        // Generate and save the provider ID
-        try {
-            const wallet = await jwkFromMnemonic(mnemonic);
-            const providerId = await arweave.wallets.jwkToAddress(wallet);
-            await updateEnvVariable('PROVIDER_ID', providerId);
-            process.env.PROVIDER_ID = providerId;
-        } catch (error) {
-            throw new Error(`Failed to generate and save provider ID: ${error}`);
-        }
-        
-    } catch (error) {
-        throw new Error(`Wallet configuration setup failed: ${error}`);
-    }
+    
+    // Create new wallet
+    seedPhrase = generateMnemonic(128);
+    const wallet = await jwkFromMnemonic(seedPhrase);
+    walletJson = JSON.stringify(wallet);
+    const providerId = await arweave.wallets.jwkToAddress(wallet);
+    
+    await updateEnvVariable('SEED_PHRASE', seedPhrase);
+    await updateEnvVariableWithSingleQuotes('WALLET_JSON', walletJson);
+    await updateEnvVariable('PROVIDER_ID', providerId);
+    
+    process.env.SEED_PHRASE = seedPhrase;
+    process.env.WALLET_JSON = walletJson;
+    process.env.PROVIDER_ID = providerId;
+    
+    console.log(`New wallet created. Seed phrase: ${seedPhrase}`);
 }
 
 /**
- * Initialize wallet from environment variables
- * Prioritizes SEED_PHRASE over WALLET_JSON if both are present
- * 
- * @returns JWK wallet object
+ * Load wallet JSON from environment or .env file
+ */
+function loadWalletJson(): string | null {
+    if (process.env.WALLET_JSON) {
+        return process.env.WALLET_JSON;
+    }
+    
+    const envPath = path.join('/host-compose', '.env');
+    if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, 'utf8');
+        const walletJsonMatch = envContent.match(/^WALLET_JSON\s*=\s*'(.+)'$/ms);
+        if (walletJsonMatch) {
+            return walletJsonMatch[1];
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Load seed phrase from environment or .env file
+ */
+function loadSeedPhrase(): string | null {
+    if (process.env.SEED_PHRASE && process.env.SEED_PHRASE !== "Create a NEW wallet and enter the 12 - 24 words here") {
+        return process.env.SEED_PHRASE;
+    }
+    
+    const envPath = path.join('/host-compose', '.env');
+    if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, 'utf8');
+        const seedPhraseMatch = envContent.match(/^SEED_PHRASE="(.+)"$/m);
+        if (seedPhraseMatch && seedPhraseMatch[1] !== "Create a NEW wallet and enter the 12 - 24 words here") {
+            return seedPhraseMatch[1];
+        }
+    }
+    
+    return null;
+}
+
+
+/**
+ * Get the wallet JWK interface
+ */
+export async function getWallet(): Promise<JWKInterface> {
+    if (globalWallet) {
+        return globalWallet;
+    }
+    
+    if (!process.env.WALLET_JSON) {
+        throw new Error('WALLET_JSON not found. Call ensureWalletConfiguration first.');
+    }
+    
+    globalWallet = JSON.parse(process.env.WALLET_JSON);
+    return globalWallet!;
+}
+
+/**
+ * Initialize wallet from environment variables (DEPRECATED - use getWallet instead)
  */
 export async function initializeWallet(): Promise<JWKInterface> {
-  // If wallet is already initialized, return it
-  if (globalWallet) {
-    return globalWallet;
-  }
-
-  const hasSeedPhrase = !!process.env.SEED_PHRASE;
-  const hasWalletJson = !!process.env.WALLET_JSON;
-
-  if (!hasSeedPhrase && !hasWalletJson) {
-    throw new Error("No wallet configuration found. Please provide either SEED_PHRASE or WALLET_JSON in environment variables.");
-  }
-
-  let wallet: JWKInterface;
-
-  // Try to load wallet from seed phrase if available
-  if (hasSeedPhrase) {
-    try {
-      const seedPhrase = process.env.SEED_PHRASE!;
-      
-      const validationResult = isValidMnemonic(seedPhrase);
-      
-      if (!validationResult) {
-        throw new Error("Invalid seed phrase format");
-      }
-      
-      wallet = await jwkFromMnemonic(seedPhrase);
-      const seedPhraseAddress = await arweave.wallets.jwkToAddress(wallet);
-      
-      walletSource = 'seed_phrase';
-      globalWallet = wallet;
-      
-      // Set PROVIDER_ID in .env file
-      try {
-        await updateEnvVariable('PROVIDER_ID', seedPhraseAddress);
-        process.env.PROVIDER_ID = seedPhraseAddress;
-      } catch (error) {
-        // Ignore env file errors in standalone mode
-      }
-      
-    } catch (error) {
-      // Fall back to JSON if available
-      if (!hasWalletJson) {
-        throw error;
-      }
-    }
-  }
-
-  // If we haven't successfully initialized the wallet from seed phrase, try JSON
-  if (!globalWallet && hasWalletJson) {
-    try {
-      wallet = JSON.parse(process.env.WALLET_JSON!);
-      const jsonAddress = await arweave.wallets.jwkToAddress(wallet);
-      
-      walletSource = 'json';
-      globalWallet = wallet;
-      
-      // Set PROVIDER_ID in .env file
-      try {
-        await updateEnvVariable('PROVIDER_ID', jsonAddress);
-        process.env.PROVIDER_ID = jsonAddress;
-      } catch (error) {
-        // Ignore env file errors in standalone mode
-      }
-    } catch (error) {
-      throw new Error(`Failed to initialize wallet from WALLET_JSON: ${error}`);
-    }
-  }
-
-  return globalWallet!;
+  return await getWallet();
 }
 
 /**
@@ -317,17 +318,8 @@ export async function initializeWallet(): Promise<JWKInterface> {
  * @returns Provider ID/wallet address
  */
 export async function getWalletAddress(): Promise<string> {
-  const wallet = await initializeWallet();
+  const wallet = await getWallet();
   return await arweave.wallets.jwkToAddress(wallet);
-}
-
-/**
- * Get the wallet for signing transactions
- * 
- * @returns JWK wallet object
- */
-export async function getWallet(): Promise<JWKInterface> {
-  return await initializeWallet();
 }
 
 /**
