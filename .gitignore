@@ -54,3 +54,5 @@ __pycache__/
 *.pack
 *.idx
 
+docker-compose/images/*.tar
+docker-compose/images/*.tar

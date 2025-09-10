@@ -6,7 +6,7 @@ import { checkAndFetchIfNeeded, cleanupFulfilledEntries, crank, getProviderReque
 import logger, { LogLevel, Logger } from './logger';
 import { monitoring } from './monitoring';
 
-export const VERSION = "1.0.18";
+export const VERSION = "1.0.20";
 
 export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
@@ -63,7 +63,7 @@ function getLogId(): string {
     return `[LogID: ${randomId} | ${timestamp}]`;
 }
 
-async function polling(client: any) {
+async function polling(client: any, randomClient: any) {
     if (pollingInProgress) {
         const completedSteps = Object.entries(stepTracking)
             .filter(([_, data]) => data?.completed)
@@ -71,18 +71,17 @@ async function polling(client: any) {
 
         logger.debug(`\n[SKIPPED] Polling already in progress for ${lastPollingId}. Skipping this run.`);
         logger.debug(`Completed steps so far: ${completedSteps.length > 0 ? completedSteps.join(", ") : "None"}`);
-        logger.verbose("Current step tracking status:", stepTracking); // Debugging info to inspect tracking object
-        return; // Prevent concurrent execution
+        return;
     }
 
-    resetStepTracking(); // Reset step tracking for fresh polling
-    pollingInProgress = true; // Mark polling as in progress
+    resetStepTracking();
+    pollingInProgress = true;
     const logId = getLogId();
     lastPollingId = logId;
     logger.info(`${logId} Starting Polling...`);
 
     try {
-        const startTime = Date.now(); // Start time of polling
+        const startTime = Date.now();
 
         // Step 1: Fetch open requests
         const s1 = Date.now();
@@ -90,11 +89,10 @@ async function polling(client: any) {
         const openRequests = await getProviderRequests(PROVIDER_ID, logId);
         const timeTaken = Date.now() - s1;
         stepTracking.step1 = { completed: true, timeTaken };
-        // Update monitoring with step timing
         monitoring.updateStepTiming('step1', timeTaken);
         logger.debug(`${logId} Step 1: Open requests fetched. Time taken: ${stepTracking.step1.timeTaken}ms`);
 
-        // Run Step 2, 3, and 4 concurrently
+        // Run Steps 2, 3, and 4 concurrently
         await Promise.all([
             (async () => {
                 const s2 = Date.now();
@@ -102,7 +100,6 @@ async function polling(client: any) {
                 await processChallengeRequests(client, openRequests.activeChallengeRequests, logId);
                 const timeTaken = Date.now() - s2;
                 stepTracking.step2 = { completed: true, timeTaken };
-                // Update monitoring with step timing
                 monitoring.updateStepTiming('step2', timeTaken);
                 logger.debug(`${logId} Step 2 completed. Time taken: ${stepTracking.step2.timeTaken}ms`);
             })(),
@@ -112,124 +109,86 @@ async function polling(client: any) {
                 await processOutputRequests(client, openRequests.activeOutputRequests, logId);
                 const timeTaken = Date.now() - s3;
                 stepTracking.step3 = { completed: true, timeTaken };
-                // Update monitoring with step timing
                 monitoring.updateStepTiming('step3', timeTaken);
                 logger.debug(`${logId} Step 3 completed. Time taken: ${stepTracking.step3.timeTaken}ms`);
             })(),
             (async () => {
                 const s4 = Date.now();
                 logger.debug(`${logId} Step 4 started.`);
-                //TODO enable this again later
                 await cleanupFulfilledEntries(client, openRequests, logId);
-                await checkAndFetchIfNeeded(client)
-
-                crank(); //TODO find a better place for this
+                await checkAndFetchIfNeeded(client);
+                crank();
                 
                 const timeTaken = Date.now() - s4;
                 stepTracking.step4 = { completed: true, timeTaken };
-                // Update monitoring with step timing
                 monitoring.updateStepTiming('step4', timeTaken);
                 logger.debug(`${logId} Step 4 completed. Time taken: ${stepTracking.step4.timeTaken}ms`);
             })(),
         ]);
 
         const totalTime = Date.now() - startTime;
-        // Update overall step timing in monitoring
         monitoring.updateStepTiming('overall', totalTime);
         logger.info(`${logId} Polling cycle completed successfully. Total time taken: ${totalTime}ms`);
 
     } catch (error) {
         logger.error(`${logId} An error occurred during polling:`, error);
-        // Increment error count in monitoring
         monitoring.incrementErrorCount();
     } finally {
-        pollingInProgress = false; // Reset flag after execution
+        pollingInProgress = false;
     }
 }
 
 // Main function
 async function run(): Promise<void> {
+    Logger.setLogLevel(LogLevel.DEBUG);
     logger.info("Orchestrator starting up");
     
-    // Ensure wallet configuration exists, generate if needed
-    logger.info("Step 1/4: Ensuring wallet configuration...");
+    // Step 1: Ensure wallet configuration
+    console.log("[INIT] Step 1/4: Ensuring wallet configuration...");
     await ensureWalletConfiguration();
-    logger.info("Step 1/4: Wallet configuration complete");
+    console.log("[INIT] Step 1/4: ✓ Wallet configuration complete");
     
-    logger.info("Step 2/4: Initializing database services...");
+    // Step 2: Initialize database
+    console.log("[INIT] Step 2/4: Initializing database services...");
     const client = await connectWithRetry();
     await setupDatabase(client);
-    logger.info("Step 2/4: Database services initialized");
+    console.log("[INIT] Step 2/4: ✓ Database services initialized");
 
-    // Initialize wallet and set provider ID using wallet utilities
-    logger.info("Step 3/4: Initializing wallet and provider ID...");
-    try {
-        logger.info("Step 3a/4: Checking wallet configuration sources...");
-        const stepStart = Date.now();
-        
-        // This will internally handle wallet initialization from seed phrase or JSON
-        logger.info("Step 3b/4: Initializing wallet from configuration...");
-        const walletInitStart = Date.now();
-        const address = await getWalletAddress();
-        logger.info(`Step 3b/4: Wallet initialization complete (${Date.now() - walletInitStart}ms)`);
-        
-        logger.info("Step 3c/4: Setting provider ID from wallet address...");
-        const providerIdStart = Date.now();
-        PROVIDER_ID = address;
-        logger.info(`Step 3c/4: Provider ID set: ${address} (${Date.now() - providerIdStart}ms)`);
-        
-        logger.info("Step 3d/4: Validating provider ID configuration...");
-        const validationStart = Date.now();
-        if (!PROVIDER_ID || PROVIDER_ID.length === 0) {
-            throw new Error('Provider ID is empty or invalid');
-        }
-        logger.info(`Step 3d/4: Provider ID validation complete (${Date.now() - validationStart}ms)`);
-        
-        logger.info(`Step 3/4: Wallet and provider ID initialization complete (Total: ${Date.now() - stepStart}ms)`);
-    } catch (error) {
-        logger.error('Failed to initialize wallet and provider ID:', error);
-        process.exit(1);
-    }
+    // Step 3: Get provider ID
+    console.log("[INIT] Step 3/4: Getting provider ID...");
+    PROVIDER_ID = await getWalletAddress();
+    console.log(`[INIT] Step 3/4: ✓ Provider ID ready: ${PROVIDER_ID}`);
     
-    // Initialize random client before starting main operations
-    logger.info("Step 4/4: Initializing random client (CRITICAL - must complete before operations)...");
-    try {
-        const randomClient = await getRandomClient();
-        logger.info("Step 4/4: Random client initialization complete - system ready for operations");
-        logger.info("=== ORCHESTRATOR STARTUP COMPLETE ===");
-    } catch (error) {
-        logger.error('CRITICAL: Failed to initialize random client during startup:', error);
-        logger.error('System cannot proceed without random client - shutting down');
-        process.exit(1);
-    }
+    // Step 4: Initialize random client
+    console.log("[INIT] Step 4/4: Initializing random client...");
+    let randomClient = await getRandomClient();
+    console.log("[INIT] Step 4/4: ✓ Random client initialization complete");
+    console.log("[INIT] 🚀 === ORCHESTRATOR STARTUP COMPLETE ===");
 
-    // Handle graceful shutdown before entering infinite loop
+    // Setup graceful shutdown
     process.on("SIGTERM", async () => {
         logger.info("SIGTERM received. Shutting down gracefully.");
         await client.end();
         await gracefulShutdown();
         for (let i = 0; i < SHUTDOWN_POLLING_DELAY; i++) {
             try {
-                await polling(client);
+                await polling(client, randomClient);
             } catch (error) {
                 logger.error(`Shutdown Polling iteration ${i + 1} failed:`, error);
             }
         }
-        await Logger.close(); // Use the static close method on the Logger class
+        await Logger.close();
         process.exit(0);
     });
-    //TODO SEE WHATS BETTER (This could possibly have a new tx queed up while the old one is in the works to keep it speeds but who knows)
-    // setInterval(async () => {
-    //     await polling(client);
-    // }, POLLING_INTERVAL_MS);
 
-    // Infinite polling loop with maintenance
+    // Main polling loop with maintenance
     while (true) {
         try {
             const currentTime = Date.now();
             
-            // Regular polling
-            await polling(client);
+            // Get fresh random client and poll
+            randomClient = await getRandomClient();
+            await polling(client, randomClient);
             
             // Database maintenance every 10 minutes
             if (currentTime - lastMaintenanceTime >= DATABASE_MAINTENANCE_INTERVAL) {
