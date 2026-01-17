@@ -40,6 +40,13 @@ services:
       DOCKER_NETWORK: backend
       NETWORK_IP: ${NETWORK_IP}
       NETWORK_MODE: ${NETWORK_MODE}
+      # Logging Configuration (1 day retention, ~2GB max per orchestrator)
+      LOG_ROTATE: "true"              # Enable log rotation
+      LOG_RETENTION_HOURS: "24"       # Keep logs for 24 hours (1 day)
+      LOG_MAX_SIZE: "52428800"        # 50MB per log file
+      LOG_MAX_FILES: "40"             # Max 40 files = ~2GB total
+      LOG_FILE_LEVEL: "VERBOSE"       # Detailed file logging
+      LOG_CONSOLE_LEVEL: "INFO"       # Less verbose console output
     networks:
       - backend
     volumes:

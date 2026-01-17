@@ -28,6 +28,7 @@ export interface LoggerConfig {
     maxLogFileSizeBytes: number;
     rotateLogFiles: boolean;
     maxLogFiles: number;
+    retentionHours: number;  // How long to keep logs before deletion
 }
 
 export class Logger {
@@ -69,12 +70,54 @@ export class Logger {
         }
     }
 
+    private cleanupOldLogFiles(): void {
+        try {
+            if (!this.config.rotateLogFiles || this.config.retentionHours <= 0) {
+                return; // Skip if rotation disabled or retention is 0
+            }
+
+            const logDir = path.dirname(this.config.logFilePath);
+            const logBaseName = path.basename(this.config.logFilePath);
+            const retentionMs = this.config.retentionHours * 60 * 60 * 1000;
+            const cutoffTime = Date.now() - retentionMs;
+
+            // Get all rotated log files (e.g., orchestrator.log.0, orchestrator.log.1, etc.)
+            const files = fs.readdirSync(logDir);
+            const logFiles = files.filter(file =>
+                file.startsWith(logBaseName) && file !== logBaseName
+            );
+
+            let deletedCount = 0;
+            for (const file of logFiles) {
+                const filePath = path.join(logDir, file);
+                const stats = fs.statSync(filePath);
+
+                // Delete if older than retention period
+                if (stats.mtimeMs < cutoffTime) {
+                    fs.unlinkSync(filePath);
+                    deletedCount++;
+                    console.log(`[Logger] Deleted old log file: ${file} (age: ${Math.round((Date.now() - stats.mtimeMs) / 3600000)}h)`);
+                }
+            }
+
+            if (deletedCount > 0) {
+                console.log(`[Logger] Cleanup complete: ${deletedCount} old log files deleted`);
+            }
+        } catch (error) {
+            console.error(`[Logger] Error during log cleanup: ${error}`);
+        }
+    }
+
     private rotateLogFiles(): void {
         try {
+            // First, cleanup old files based on retention period
+            this.cleanupOldLogFiles();
+
+            // Then do standard rotation
             for (let i = this.config.maxLogFiles - 1; i > 0; i--) {
                 const oldFile = `${this.config.logFilePath}.${i - 1}`;
                 const newFile = `${this.config.logFilePath}.${i}`;
-                
+
                 if (fs.existsSync(oldFile)) {
                     if (fs.existsSync(newFile)) {
                         fs.unlinkSync(newFile);
@@ -82,7 +125,7 @@ export class Logger {
                     fs.renameSync(oldFile, newFile);
                 }
             }
-            
+
             const oldestFile = `${this.config.logFilePath}.0`;
             if (fs.existsSync(this.config.logFilePath)) {
                 if (fs.existsSync(oldestFile)) {
@@ -182,9 +225,10 @@ export class Logger {
             consoleLogLevel: this.parseLogLevel(process.env.LOG_CONSOLE_LEVEL) || LogLevel.INFO,
             fileLogLevel: this.parseLogLevel(process.env.LOG_FILE_LEVEL) || LogLevel.VERBOSE,
             logFilePath: process.env.LOG_FILE_PATH || path.join(process.cwd(), 'logs', 'orchestrator.log'),
-            maxLogFileSizeBytes: parseInt(process.env.LOG_MAX_SIZE || '10485760', 10), // 10MB default
-            rotateLogFiles: process.env.LOG_ROTATE === 'true',
-            maxLogFiles: parseInt(process.env.LOG_MAX_FILES || '5', 10)
+            maxLogFileSizeBytes: parseInt(process.env.LOG_MAX_SIZE || '52428800', 10), // 50MB default (increased from 10MB)
+            rotateLogFiles: process.env.LOG_ROTATE !== 'false', // Default to TRUE (opt-out instead of opt-in)
+            maxLogFiles: parseInt(process.env.LOG_MAX_FILES || '40', 10), // 40 files × 50MB = 2GB total
+            retentionHours: parseInt(process.env.LOG_RETENTION_HOURS || '24', 10) // Default 24 hours (1 day)
         };
 
         // Merge with provided configuration
@@ -233,6 +277,12 @@ export class Logger {
         if (fileLevel !== undefined) {
             instance.config.fileLogLevel = fileLevel;
         }
+    }
+
+    // Public method to trigger cleanup of old log files
+    public static cleanupOldLogs(): void {
+        const instance = Logger.getInstance();
+        instance.cleanupOldLogFiles();
     }
 
     // Close logger (for graceful shutdown)
