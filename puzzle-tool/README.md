@@ -20,6 +20,56 @@ Key features of this Time-Lock Puzzle implementation include:
  
 This approach enables decentralized protocols to produce randomness that is guaranteed to remain secret for a specific time period, making it ideal for use cases such as secure time-released cryptography, fair contract signing, sealed-bid auctions, and other applications requiring temporal security guarantees.
 
+## Usage
+
+This tool provides three entry points:
+
+### Generate Puzzles
+Generate and save time-lock puzzles to the database:
+```bash
+python generate.py <count>
+```
+Example: `python generate.py 10` generates 10 puzzles.
+
+### Solve Puzzles
+Solve a puzzle using sequential squaring (without private key):
+```bash
+python solve.py <x_hex> <t> <N_hex>
+```
+Example: `python solve.py abc123... 1000 def456...`
+
+### Test Harness
+Run the test harness to verify puzzle generation and solving:
+```bash
+python test.py
+```
+This will:
+1. Generate 1 puzzle
+2. Solve it WITH the private key (fast)
+3. Solve it WITHOUT the private key (slow - sequential squaring)
+4. Verify both solutions match
+
+### Docker
+Build and run the puzzle tool in Docker:
+```bash
+# Build the image locally
+docker build -t randao/puzzle-tool:latest .
+
+# Or pull the pre-built image
+docker pull randao/puzzle-tool:latest
+
+# Run test harness
+docker run randao/puzzle-tool:latest python test.py
+
+# Generate puzzles
+docker run randao/puzzle-tool:latest python generate.py 5
+
+# Solve a puzzle
+docker run randao/puzzle-tool:latest python solve.py <x> <t> <N>
+```
+
+For building and pushing to Docker Hub, see the [Development Documentation](./docs/developing.md#building-and-pushing-docker-image).
+
 ## Development
 For detailed development guidelines, including contributing, testing, and documentation, please refer to the [Development Documentation](./docs/developing.md).
 

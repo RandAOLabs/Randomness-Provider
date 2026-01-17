@@ -37,12 +37,27 @@ python src/database/initialize_db.py
 
 
 ## Running the Project
-To generate a VDF proof and verify it, run the main.py script:
+
+### Generate Puzzles
+To generate time lock puzzles and store them in the database:
 ```bash
-python main.py 10
+python generate.py 10
 ```
 Required Command line Arguments:
  - count: the number of time lock puzzles to generate and store in the database
+
+### Solve Puzzles
+To solve a puzzle using sequential squaring (without private key):
+```bash
+python solve.py <x_hex> <t> <N_hex>
+```
+
+### Test Harness
+To run the test harness:
+```bash
+python test.py
+```
+This will generate 1 puzzle and solve it both with and without the private key to verify correctness.
 
 ## Running the Tests
 To run the unit tests, use the following command:
@@ -59,25 +74,28 @@ pytest --cov=src
 
 
 
-# Set version as an environment variable
-export VERSION=v0.1.6  # Change this value as needed
+## Building and Pushing Docker Image
 
-# Initial build and tagging for local testing
-docker build -t randao/puzzle-gen:latest -t randao/puzzle-gen:$VERSION .
+# Export version as an environment variable
+export VERSION=v0.1.7  # You can change this value to any version you want
 
-# Log in to Docker Hub (optional, remove if already logged in)
+# Build the Docker image with the version tag
+docker build -t randao/puzzle-tool:latest -t randao/puzzle-tool:$VERSION .
+
+# Log in to Docker Hub (if not already logged in)
 docker login
 
-# Push local builds
-docker push randao/puzzle-gen:latest
-docker push randao/puzzle-gen:$VERSION
+# Push both tags to Docker Hub
+docker push randao/puzzle-tool:latest
+docker push randao/puzzle-tool:$VERSION
 
+# (Optional) Multi-platform build for ARM64 and AMD64
 # Set up and use Docker buildx builder (if not already created)
 docker buildx create --name arm-builder --use || docker buildx use arm-builder
 docker buildx inspect --bootstrap
 
-# Multi-platform build for ARM64 and AMD64, and push to Docker Hub
+# Multi-platform build and push to Docker Hub
 docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
-  -t randao/puzzle-gen:latest \
-  -t randao/puzzle-gen:$VERSION \
+  -t randao/puzzle-tool:latest \
+  -t randao/puzzle-tool:$VERSION \
   --push .
