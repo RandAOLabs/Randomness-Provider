@@ -227,15 +227,15 @@ export async function getPuzzleDataForChallenge(client: Client, requestId: strin
 export async function getPuzzleDataForOutput(client: Client, requestId: string): Promise<{
     id: string;
     output: string;
-    rsaP: string;
-    rsaQ: string;
+    rsap: string;
+    rsaq: string;
 } | null> {
     const res = await client.query(
-        `SELECT 
-            tlp.id, 
-            tlp.y AS output, 
-            rk.p AS rsaP, 
-            rk.q AS rsaQ 
+        `SELECT
+            tlp.id,
+            tlp.y AS output,
+            rk.p AS rsap,
+            rk.q AS rsaq
         FROM time_lock_puzzles tlp
         JOIN rsa_keys rk ON tlp.rsa_id = rk.id
         WHERE tlp.request_id = $1`,

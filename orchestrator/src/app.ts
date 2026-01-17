@@ -22,6 +22,7 @@ export const POLLING_INTERVAL_MS = 0; //0 second
 export const DATABASE_CHECK_TIME = 60000; //60 seconds
 export const DATABASE_MAINTENANCE_INTERVAL = 10 * 60 * 1000; // 10 minutes
 export const AGGRESSIVE_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 minutes
+export const LOG_CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
 export const MINIMUM_ENTRIES = 10000;
 export const DRYRUNTIMEOUT = 30000; // 30 seconds
 export const MAX_RETRIES = 10;
@@ -36,6 +37,7 @@ let pollingInProgress = false;
 let lastPollingId: string | null = null;
 let lastMaintenanceTime = 0;
 let lastAggressiveCleanupTime = 0;
+let lastLogCleanupTime = 0;
 
 const arweave = Arweave.init({});
 
@@ -185,23 +187,29 @@ async function run(): Promise<void> {
     while (true) {
         try {
             const currentTime = Date.now();
-            
+
             // Get fresh random client and poll
             randomClient = await getRandomClient();
             await polling(client, randomClient);
-            
+
             // Database maintenance every 10 minutes
             if (currentTime - lastMaintenanceTime >= DATABASE_MAINTENANCE_INTERVAL) {
                 await performDatabaseMaintenance(client);
                 lastMaintenanceTime = currentTime;
             }
-            
+
             // Aggressive cleanup every 30 minutes
             if (currentTime - lastAggressiveCleanupTime >= AGGRESSIVE_CLEANUP_INTERVAL) {
                 await performAggressiveCleanup(client);
                 lastAggressiveCleanupTime = currentTime;
             }
-            
+
+            // Log cleanup every hour
+            if (currentTime - lastLogCleanupTime >= LOG_CLEANUP_INTERVAL) {
+                Logger.cleanupOldLogs();
+                lastLogCleanupTime = currentTime;
+            }
+
         } catch (error) {
             logger.error("Polling error:", error);
         }

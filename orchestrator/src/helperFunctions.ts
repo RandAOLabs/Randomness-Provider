@@ -26,8 +26,8 @@ const MAX_RANDOM_PER_REQUEST = 500;
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 // Tracking maps
-const challengeCooldowns = new Map<string, boolean>();
-const outputCooldowns = new Map<string, boolean>();
+const challengeCooldowns = new Map<string, number>();
+const outputCooldowns = new Map<string, number>();
 const requestTimestamps: Map<string, number> = new Map();
 let lastUpdatedOnChainTime = 0;
 
@@ -610,18 +610,16 @@ export async function updateAvailableValuesAsync(currentCount: number) {
 async function fulfillRandomChallenge(client: Client, requestId: string, parentLogId: string): Promise<void> {
     const logPrefix = `${parentLogId} [Challenge ${requestId}]`;
     
-    // Check if this request is already being processed
-    if (challengeCooldowns.has(requestId)) {
+    // Check if this request is in cooldown
+    const now = Date.now();
+    const lastTime = challengeCooldowns.get(requestId);
+    if (lastTime && now - lastTime < 5000) { // 5 second cooldown
         logger.debug(`${logPrefix} Request is in cooldown, skipping...`);
         return;
     }
 
-    // Set cooldown immediately to prevent concurrent processing
-    challengeCooldowns.set(requestId, true);
-    const cooldownTimer = setTimeout(() => {
-        challengeCooldowns.delete(requestId);
-        logger.debug(`${logPrefix} Cooldown released`);
-    }, 60000); // 1 minute cooldown
+    // Set cooldown timestamp
+    challengeCooldowns.set(requestId, now);
 
     let randomClient: RandomClient | null = null;
     let retryCount = 0;
@@ -703,18 +701,16 @@ async function fulfillRandomChallenge(client: Client, requestId: string, parentL
 async function fulfillRandomOutput(client: Client, requestId: string, parentLogId: string): Promise<void> {
     const logPrefix = `${parentLogId} [Output ${requestId}]`;
     
-    // Check if this request is already being processed
-    if (outputCooldowns.has(requestId)) {
+    // Check if this request is in cooldown
+    const now = Date.now();
+    const lastTime = outputCooldowns.get(requestId);
+    if (lastTime && now - lastTime < 5000) { // 5 second cooldown
         logger.debug(`${logPrefix} Request is in cooldown, skipping...`);
         return;
     }
 
-    // Set cooldown immediately to prevent concurrent processing
-    outputCooldowns.set(requestId, true);
-    const cooldownTimer = setTimeout(() => {
-        outputCooldowns.delete(requestId);
-        logger.debug(`${logPrefix} Cooldown released`);
-    }, 60000); // 1 minute cooldown
+    // Set cooldown timestamp
+    outputCooldowns.set(requestId, now);
 
     let randomClient: RandomClient | null = null;
     let retryCount = 0;
@@ -731,26 +727,26 @@ async function fulfillRandomOutput(client: Client, requestId: string, parentLogI
 
             // Use db_tools function to get puzzle data for output
             const puzzleData = await getPuzzleDataForOutput(client, requestId);
-            
+
             if (!puzzleData) {
                 logger.error(`${logPrefix} No database entry found for request`);
                 return;
             }
 
-            const { id: dbId, output, rsaP, rsaQ } = puzzleData;
-            
-            if (!output || !rsaP || !rsaQ) {
+            const { id: dbId, output, rsap, rsaq } = puzzleData;
+
+            if (!output || !rsap || !rsaq) {
                 throw new Error('Missing required fields in database entry');
             }
 
             logger.debug(`${logPrefix} Posting VDF output and proof for DB ID: ${dbId}`);
-            
+
             // Post the VDF output and proof
             await randomClient.reveal({
                 requestId: requestId,
                 rsa_key: {
-                    p: rsaP,
-                    q: rsaQ
+                    p: rsap,
+                    q: rsaq
                 }
             });
 
