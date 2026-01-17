@@ -110,7 +110,7 @@ export async function triggerTimePuzzleJobPod(randomCount: number): Promise<stri
   try {
     const container = await docker.createContainer({
       Image: TIME_PUZZLE_JOB_IMAGE,
-      Cmd: ['sh', '-c', `python3 main.py ${randomCount}`],
+      Cmd: ['sh', '-c', `python3 generate.py ${randomCount}`],
       Env: [
         `DATABASE_TYPE=postgresql`,
         `DATABASE_HOST=${dbConfig.host}`,

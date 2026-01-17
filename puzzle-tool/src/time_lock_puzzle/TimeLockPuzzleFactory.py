@@ -1,7 +1,6 @@
 from typing import List, Tuple
 import multiprocessing
 
-from src.time_lock_puzzle import TimeLockPuzzleBuilder
 from ..utils.SystemSpecs import SystemSpecs
 from ..mpc import MPC
 from ..mpc.types import MPZ
@@ -9,11 +8,10 @@ from ..random import Random
 from ..rsa.RSA import RSA
 from .TimeLockPuzzle import TimeLockPuzzle
 from .EfficientTimeLockPuzzleSolver import EfficientTimeLockPuzzleSolver
-from .abstract.ITimeLockPuzzleFactory import ITimeLockPuzzleFactory
 
 
-class TimeLockPuzzleFactory(ITimeLockPuzzleFactory):
-    """Implementation of time lock puzzle factory."""
+class TimeLockPuzzleFactory:
+    """Factory for creating time lock puzzles."""
 
     def __init__(self, bit_size: int, timing_parameter: MPZ) -> None:
         """Initialize the factory.
@@ -33,14 +31,8 @@ class TimeLockPuzzleFactory(ITimeLockPuzzleFactory):
         rand = Random.get_random(self._bit_size)
         x = MPC.mpz_urandomb(rand, self._bit_size)
 
-        # Create puzzle using builder
-        puzzle = (
-            TimeLockPuzzleBuilder()
-            .set_x(x)
-            .set_t(self._t)
-            .set_N(rsa_instance.get_N())
-            .build()
-        )
+        # Create puzzle directly
+        puzzle = TimeLockPuzzle(x, self._t, rsa_instance.get_N())
 
         # Get solution using efficient solver
         y = EfficientTimeLockPuzzleSolver.solve(rsa_instance, puzzle)

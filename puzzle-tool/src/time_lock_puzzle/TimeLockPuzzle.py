@@ -1,9 +1,8 @@
 from ..mpc.types import MPZ
-from .abstract.ITimeLockPuzzle import ITimeLockPuzzle
 
 
-class TimeLockPuzzle(ITimeLockPuzzle):
-    """Implementation of a time lock puzzle."""
+class TimeLockPuzzle:
+    """A time lock puzzle."""
 
     def __init__(self, x: MPZ, t: MPZ, N: MPZ) -> None:
         """Initialize a time lock puzzle.

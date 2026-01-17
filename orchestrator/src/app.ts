@@ -10,7 +10,7 @@ export const VERSION = "1.0.20";
 
 export const docker = new Docker();
 export const DOCKER_NETWORK = process.env.DOCKER_NETWORK || "backend";
-export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-gen:v0.1.6';
+export const TIME_PUZZLE_JOB_IMAGE = 'randao/puzzle-tool:v0.1.7';
 export const ORCHESTRATOR_IMAGE = 'randao/orchestrator:latest';
 
 // Optional network monitoring variables

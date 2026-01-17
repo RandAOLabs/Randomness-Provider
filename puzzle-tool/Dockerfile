@@ -31,5 +31,7 @@ ENV DB_NAME=mydatabase \
 # Expose any necessary ports (optional, specify if your app uses specific ports)
 # EXPOSE 8000
 
-# Command to run the main script
-# CMD ["python", "main.py"]
+# Default command to run the generation script
+# Override with: docker run <image> python solve.py <args>
+# Or: docker run <image> python test.py
+CMD ["python", "generate.py", "1"]
